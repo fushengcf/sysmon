@@ -1,0 +1,15 @@
+# Rust / sysmon-ws
+sysmon-ws/target/
+sysmon-ws/dist/
+
+# Android / sysmon-android
+sysmon-android/.gradle/
+sysmon-android/build/
+sysmon-android/app/build/
+sysmon-android/local.properties
+sysmon-android/.idea/
+sysmon-android/*.iml
+
+# macOS
+.DS_Store
+**/.DS_Store

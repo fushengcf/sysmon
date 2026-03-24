@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">SysMon</string>
+    <string name="widget_net_speed_desc">网速监控小组件</string>
+    <string name="widget_cpu_desc">CPU 使用率小组件</string>
+    <string name="widget_mem_desc">内存使用率小组件</string>
+</resources>

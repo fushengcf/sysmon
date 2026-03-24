@@ -1,0 +1,159 @@
+name: Cross-Platform Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+env:
+  BINARY_NAME: sysmon-ws
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # ─────────────────────────────────────────────
+  # macOS: 同时构建 arm64 + x86_64 Universal Binary
+  # ─────────────────────────────────────────────
+  build-macos:
+    name: Build macOS (Universal)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: macos-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build arm64
+        working-directory: sysmon-ws
+        run: cargo build --release --target aarch64-apple-darwin
+
+      - name: Build x86_64
+        working-directory: sysmon-ws
+        run: cargo build --release --target x86_64-apple-darwin
+
+      - name: Create Universal Binary
+        working-directory: sysmon-ws
+        run: |
+          lipo -create -output ${{ env.BINARY_NAME }}-macos-universal \
+            target/aarch64-apple-darwin/release/${{ env.BINARY_NAME }} \
+            target/x86_64-apple-darwin/release/${{ env.BINARY_NAME }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-universal
+          path: sysmon-ws/${{ env.BINARY_NAME }}-macos-universal
+
+  # ─────────────────────────────────────────────
+  # Windows: x86_64-pc-windows-msvc (原生 MSVC)
+  # ─────────────────────────────────────────────
+  build-windows:
+    name: Build Windows (x86_64)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: windows-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build
+        working-directory: sysmon-ws
+        run: cargo build --release --target x86_64-pc-windows-msvc
+
+      - name: Rename artifact
+        working-directory: sysmon-ws
+        run: |
+          copy target\x86_64-pc-windows-msvc\release\${{ env.BINARY_NAME }}.exe `
+               ${{ env.BINARY_NAME }}-windows-x86_64.exe
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-x86_64
+          path: sysmon-ws/${{ env.BINARY_NAME }}-windows-x86_64.exe
+
+  # ─────────────────────────────────────────────
+  # Ubuntu/Linux: x86_64-unknown-linux-gnu
+  # ─────────────────────────────────────────────
+  build-linux:
+    name: Build Linux (x86_64)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: linux-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build
+        working-directory: sysmon-ws
+        run: cargo build --release --target x86_64-unknown-linux-gnu
+
+      - name: Rename artifact
+        working-directory: sysmon-ws
+        run: |
+          cp target/x86_64-unknown-linux-gnu/release/${{ env.BINARY_NAME }} \
+             ${{ env.BINARY_NAME }}-linux-x86_64
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-x86_64
+          path: sysmon-ws/${{ env.BINARY_NAME }}-linux-x86_64
+
+  # ─────────────────────────────────────────────
+  # 发布 GitHub Release（仅 tag 触发）
+  # ─────────────────────────────────────────────
+  release:
+    name: Create GitHub Release
+    needs: [build-macos, build-windows, build-linux]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/macos-universal/sysmon-ws-macos-universal
+            artifacts/windows-x86_64/sysmon-ws-windows-x86_64.exe
+            artifacts/linux-x86_64/sysmon-ws-linux-x86_64
+          generate_release_notes: true

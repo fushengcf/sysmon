@@ -1,0 +1,65 @@
+[package]
+name = "sysmon-ws"
+version = "0.1.0"
+edition = "2021"
+description = "Cross-platform system monitor with WebSocket streaming (CPU, Memory, Network)"
+authors = ["sysmon-ws"]
+
+# 托盘 GUI 入口
+[[bin]]
+name = "sysmon-ws"
+path = "src/main.rs"
+
+[dependencies]
+# 系统信息采集 - 跨平台支持 macOS / Windows / Linux
+sysinfo = "0.30"
+
+# 异步运行时
+tokio = { version = "1", features = ["full"] }
+
+# WebSocket 服务器
+tokio-tungstenite = "0.21"
+tungstenite = "0.21"
+
+# 序列化
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# 日志
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# 网络地址处理
+futures-util = "0.3"
+
+# 时间处理
+chrono = { version = "0.4", features = ["serde"] }
+
+# 错误处理
+anyhow = "1"
+
+# 系统托盘（跨平台：macOS / Windows / Linux）
+tray-icon = { version = "0.14", features = ["common-controls-v6"] }
+
+# winit 事件循环（驱动 macOS Cocoa 主线程，防止"无响应"）
+winit = "0.29"
+
+# 图片处理（生成托盘图标）
+image = "0.25"
+
+# macOS AppKit 直接调用（两行状态栏 view）
+[target.'cfg(target_os = "macos")'.dependencies]
+objc = "0.2"
+cocoa = "0.25"
+core-graphics = "0.23"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+
+# ---- 跨平台编译目标说明 ----
+# macOS (本机):   cargo build --release
+# Windows:        cargo build --release --target x86_64-pc-windows-gnu
+# Ubuntu/Linux:   cargo build --release --target x86_64-unknown-linux-gnu

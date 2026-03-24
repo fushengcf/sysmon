@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- 应用标识 -->
+    <key>CFBundleIdentifier</key>
+    <string>com.sysmon-ws.app</string>
+
+    <!-- 显示名称 -->
+    <key>CFBundleName</key>
+    <string>SysMon WS</string>
+
+    <key>CFBundleDisplayName</key>
+    <string>SysMon WS</string>
+
+    <!-- 版本 -->
+    <key>CFBundleVersion</key>
+    <string>0.1.0</string>
+
+    <key>CFBundleShortVersionString</key>
+    <string>0.1.0</string>
+
+    <!-- 可执行文件名 -->
+    <key>CFBundleExecutable</key>
+    <string>sysmon-ws</string>
+
+    <!-- 图标文件（不含扩展名） -->
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
+
+    <!-- macOS App Bundle 类型 -->
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+
+    <key>CFBundleSignature</key>
+    <string>????</string>
+
+    <!-- 最低 macOS 版本：12.0 Monterey -->
+    <key>LSMinimumSystemVersion</key>
+    <string>12.0</string>
+
+    <!-- 托盘应用：不在 Dock 显示图标 -->
+    <key>LSUIElement</key>
+    <true/>
+
+    <!-- 支持高分辨率 Retina 显示 -->
+    <key>NSHighResolutionCapable</key>
+    <true/>
+
+    <!-- 隐私权限说明（macOS 13+ 需要） -->
+    <key>NSHumanReadableCopyright</key>
+    <string>Copyright © 2024 sysmon-ws. All rights reserved.</string>
+
+    <!-- 主 nib 文件（不需要，纯代码） -->
+    <key>NSPrincipalClass</key>
+    <string>NSApplication</string>
+</dict>
+</plist>
