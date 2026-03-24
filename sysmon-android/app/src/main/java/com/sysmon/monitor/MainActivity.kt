@@ -35,11 +35,7 @@ class MainActivity : ComponentActivity() {
         // 全屏沉浸式
         enableEdgeToEdge()
         WindowCompat.setDecorFitsSystemWindows(window, false)
-        WindowInsetsControllerCompat(window, window.decorView).apply {
-            hide(WindowInsetsCompat.Type.systemBars())
-            systemBarsBehavior =
-                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-        }
+        hideSystemBars()
 
         // 监听连接状态
         lifecycleScope.launch {
@@ -79,8 +75,24 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        // 每次回到前台时，如果未连接则重新尝试自动连接列表
+        // 每次回到前台时重新隐藏系统栏（防止从后台切回后状态栏重新出现）
+        hideSystemBars()
+        // 如果未连接则重新尝试自动连接列表
         vm.retryAutoConnect()
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        // 窗口重新获得焦点时（如弹窗关闭后）再次隐藏系统栏
+        if (hasFocus) hideSystemBars()
+    }
+
+    private fun hideSystemBars() {
+        WindowInsetsControllerCompat(window, window.decorView).apply {
+            hide(WindowInsetsCompat.Type.systemBars())
+            systemBarsBehavior =
+                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        }
     }
 
     override fun onDestroy() {
