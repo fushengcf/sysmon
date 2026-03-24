@@ -19,39 +19,47 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
     private val wsClient = SysMonWebSocket(application)
     private val urlRepo  = UrlRepository(application)
 
-    val wsState: StateFlow<WsState>       = wsClient.state
+    val wsState: StateFlow<WsState>        = wsClient.state
     val metrics: StateFlow<SystemMetrics?> = wsClient.metrics
 
     // ── 历史数据（最多 60 个点）────────────────────────────────────────────────
-    private val _cpuHistory    = MutableStateFlow<List<Float>>(emptyList())
+    private val _cpuHistory   = MutableStateFlow<List<Float>>(emptyList())
     val cpuHistory: StateFlow<List<Float>> = _cpuHistory.asStateFlow()
 
-    private val _memHistory    = MutableStateFlow<List<Float>>(emptyList())
+    private val _memHistory   = MutableStateFlow<List<Float>>(emptyList())
     val memHistory: StateFlow<List<Float>> = _memHistory.asStateFlow()
 
-    private val _netRxHistory  = MutableStateFlow<List<Double>>(emptyList())
+    private val _netRxHistory = MutableStateFlow<List<Double>>(emptyList())
     val netRxHistory: StateFlow<List<Double>> = _netRxHistory.asStateFlow()
 
-    private val _netTxHistory  = MutableStateFlow<List<Double>>(emptyList())
+    private val _netTxHistory = MutableStateFlow<List<Double>>(emptyList())
     val netTxHistory: StateFlow<List<Double>> = _netTxHistory.asStateFlow()
 
     // ── 当前输入的 URL ─────────────────────────────────────────────────────────
     private val _wsUrl = MutableStateFlow("ws://192.168.1.100:9001")
     val wsUrl: StateFlow<String> = _wsUrl.asStateFlow()
 
-    // ── 已保存的链接列表 ───────────────────────────────────────────────────────
-    val savedUrls: StateFlow<List<String>> = urlRepo.urls
+    // ── 当前已连接的 URL（用于图表页显示备注） ─────────────────────────────────
+    private val _connectedUrl = MutableStateFlow("")
+    val connectedUrl: StateFlow<String> = _connectedUrl.asStateFlow()
 
-    // ── 自动连接状态（启动时尝试已保存链接） ──────────────────────────────────
+    // ── 已保存的链接列表 & 备注 ────────────────────────────────────────────────
+    val savedUrls: StateFlow<List<String>> = urlRepo.urls
+    val savedRemarks: StateFlow<List<String>> = urlRepo.remarks
+
+    // ── 自动连接状态 ───────────────────────────────────────────────────────────
     private val _autoConnecting = MutableStateFlow(false)
     val autoConnecting: StateFlow<Boolean> = _autoConnecting.asStateFlow()
 
     private var autoConnectJob: Job? = null
 
+    // 用户主动断开标志：为 true 时禁止自动重连，直到用户主动发起连接
+    private var manuallyDisconnected = false
+
     companion object {
         private const val MAX_HISTORY          = 60
-        private const val AUTO_CONNECT_TIMEOUT = 5_000L   // 每个链接等待 5 秒
-        private const val RECONNECT_INTERVAL   = 8_000L   // 断线后重试间隔
+        private const val AUTO_CONNECT_TIMEOUT = 5_000L
+        private const val RECONNECT_INTERVAL   = 8_000L
     }
 
     init {
@@ -59,41 +67,45 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             wsClient.metrics.collect { m ->
                 m ?: return@collect
-                _cpuHistory.value    = (_cpuHistory.value    + m.cpuUsagePercent).takeLast(MAX_HISTORY)
-                _memHistory.value    = (_memHistory.value    + m.memoryUsagePercent).takeLast(MAX_HISTORY)
-                _netRxHistory.value  = (_netRxHistory.value  + m.netRxKbps).takeLast(MAX_HISTORY)
-                _netTxHistory.value  = (_netTxHistory.value  + m.netTxKbps).takeLast(MAX_HISTORY)
+                _cpuHistory.value   = (_cpuHistory.value   + m.cpuUsagePercent).takeLast(MAX_HISTORY)
+                _memHistory.value   = (_memHistory.value   + m.memoryUsagePercent).takeLast(MAX_HISTORY)
+                _netRxHistory.value = (_netRxHistory.value + m.netRxKbps).takeLast(MAX_HISTORY)
+                _netTxHistory.value = (_netTxHistory.value + m.netTxKbps).takeLast(MAX_HISTORY)
             }
         }
 
-        // 监听断线事件：连接中断后自动重试
+        // 监听连接状态：记录已连接 URL；断线后自动重试
         viewModelScope.launch {
             wsClient.state.collect { state ->
-                if (state is WsState.Error || state is WsState.Disconnected) {
-                    // 只有在没有手动触发自动连接时才自动重试
-                    if (!_autoConnecting.value && urlRepo.urls.value.isNotEmpty()) {
-                        delay(RECONNECT_INTERVAL)
-                        // 再次检查，避免用户已手动操作
-                        if (!_autoConnecting.value &&
-                            wsClient.state.value !is WsState.Connected &&
-                            wsClient.state.value !is WsState.Connecting) {
-                            tryAutoConnect()
+                when (state) {
+                    is WsState.Connected -> _connectedUrl.value = _wsUrl.value
+                    is WsState.Error, is WsState.Disconnected -> {
+                        // 用户主动断开时不自动重连
+                        if (!manuallyDisconnected &&
+                            !_autoConnecting.value &&
+                            urlRepo.urls.value.isNotEmpty()) {
+                            delay(RECONNECT_INTERVAL)
+                            if (!manuallyDisconnected &&
+                                !_autoConnecting.value &&
+                                wsClient.state.value !is WsState.Connected &&
+                                wsClient.state.value !is WsState.Connecting) {
+                                tryAutoConnect()
+                            }
                         }
                     }
+                    else -> {}
                 }
             }
         }
 
-        // App 启动时自动尝试已保存的链接
         tryAutoConnect()
     }
 
-    // ── 自动连接：依次尝试已保存链接，成功则停止 ──────────────────────────────
+    // ── 自动连接 ───────────────────────────────────────────────────────────────
 
     private fun tryAutoConnect() {
         val urls = urlRepo.urls.value
         if (urls.isEmpty()) return
-        // 已连接则不重复触发
         if (wsClient.state.value is WsState.Connected) return
 
         autoConnectJob?.cancel()
@@ -101,11 +113,8 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
             _autoConnecting.value = true
             for (url in urls) {
                 if (wsClient.state.value is WsState.Connected) break
-
                 _wsUrl.value = url
                 wsClient.connect(url)
-
-                // 等待连接结果（最多 AUTO_CONNECT_TIMEOUT ms）
                 val deadline = System.currentTimeMillis() + AUTO_CONNECT_TIMEOUT
                 while (System.currentTimeMillis() < deadline) {
                     val state = wsClient.state.value
@@ -113,10 +122,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
                     if (state is WsState.Error || state is WsState.Disconnected) break
                     delay(200)
                 }
-
                 if (wsClient.state.value is WsState.Connected) break
-
-                // 本次失败，断开后尝试下一个
                 wsClient.disconnect()
                 delay(300)
             }
@@ -124,8 +130,9 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    /** 外部触发重新自动连接（如 Activity onResume 时调用） */
     fun retryAutoConnect() {
+        // 用户主动断开后，onResume 不触发自动重连
+        if (manuallyDisconnected) return
         if (wsClient.state.value is WsState.Connected ||
             wsClient.state.value is WsState.Connecting ||
             _autoConnecting.value) return
@@ -134,36 +141,32 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
 
     // ── 公开操作 ───────────────────────────────────────────────────────────────
 
-    fun updateUrl(url: String) {
-        _wsUrl.value = url
-    }
+    fun updateUrl(url: String) { _wsUrl.value = url }
 
     fun connect() {
+        manuallyDisconnected = false   // 主动连接，清除手动断开标志
         autoConnectJob?.cancel()
         _autoConnecting.value = false
         wsClient.connect(_wsUrl.value)
     }
 
     fun disconnect() {
+        manuallyDisconnected = true    // 标记为用户主动断开，禁止自动重连
         autoConnectJob?.cancel()
         _autoConnecting.value = false
         wsClient.disconnect()
         clearHistory()
     }
 
-    /** 保存当前 URL 到列表（连接成功时调用，或用户手动保存） */
     fun saveCurrentUrl() {
         val url = _wsUrl.value.trim()
         if (url.isNotEmpty()) urlRepo.addUrl(url)
     }
 
-    /** 从列表中删除指定 URL */
-    fun removeUrl(url: String) {
-        urlRepo.removeUrl(url)
-    }
+    fun removeUrl(url: String) { urlRepo.removeUrl(url) }
 
-    /** 选择已保存的链接并立即连接 */
     fun connectTo(url: String) {
+        manuallyDisconnected = false   // 主动选择链接，清除手动断开标志
         autoConnectJob?.cancel()
         _autoConnecting.value = false
         _wsUrl.value = url
@@ -171,6 +174,31 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         clearHistory()
         wsClient.connect(url)
     }
+
+    /** 图表页左右滑动：切换到已保存列表中的上一个/下一个链接 */
+    fun switchToPrevUrl() {
+        val urls = urlRepo.urls.value
+        if (urls.size < 2) return
+        val cur = _connectedUrl.value
+        val idx = urls.indexOf(cur)
+        val target = urls[if (idx <= 0) urls.lastIndex else idx - 1]
+        connectTo(target)
+    }
+
+    fun switchToNextUrl() {
+        val urls = urlRepo.urls.value
+        if (urls.size < 2) return
+        val cur = _connectedUrl.value
+        val idx = urls.indexOf(cur)
+        val target = urls[if (idx < 0 || idx >= urls.lastIndex) 0 else idx + 1]
+        connectTo(target)
+    }
+
+    /** 保存/更新备注 */
+    fun saveRemark(url: String, remark: String) { urlRepo.saveRemark(url, remark) }
+
+    /** 获取指定 url 的备注 */
+    fun getRemarkFor(url: String): String = urlRepo.getRemarkFor(url)
 
     private fun clearHistory() {
         _cpuHistory.value   = emptyList()

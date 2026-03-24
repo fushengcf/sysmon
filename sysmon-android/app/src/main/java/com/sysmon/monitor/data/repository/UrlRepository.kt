@@ -7,24 +7,31 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 /**
- * 持久化保存 WebSocket 链接列表（最多 MAX_URLS 个）。
- * 使用 SharedPreferences 存储，key 为 "url_0" ~ "url_9"，
- * "url_count" 记录当前数量。
+ * 持久化保存 WebSocket 链接列表（最多 MAX_URLS 个）及每条链接的备注。
+ * 使用 SharedPreferences 存储：
+ *   "url_count"   — 数量
+ *   "url_0" ~ "url_9"    — 链接
+ *   "remark_0" ~ "remark_9" — 对应备注（可为空）
  */
 class UrlRepository(context: Context) {
 
     companion object {
-        private const val PREFS_NAME = "sysmon_urls"
-        private const val KEY_COUNT  = "url_count"
-        private const val KEY_PREFIX = "url_"
+        private const val PREFS_NAME    = "sysmon_urls"
+        private const val KEY_COUNT     = "url_count"
+        private const val KEY_PREFIX    = "url_"
+        private const val REMARK_PREFIX = "remark_"
         const val MAX_URLS = 10
     }
 
     private val prefs: SharedPreferences =
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
-    private val _urls = MutableStateFlow<List<String>>(loadAll())
+    private val _urls    = MutableStateFlow<List<String>>(loadAll())
     val urls: StateFlow<List<String>> = _urls.asStateFlow()
+
+    // remarks 与 urls 一一对应，空字符串表示无备注
+    private val _remarks = MutableStateFlow<List<String>>(loadAllRemarks())
+    val remarks: StateFlow<List<String>> = _remarks.asStateFlow()
 
     // ── 读取 ──────────────────────────────────────────────────────────────────
 
@@ -35,43 +42,94 @@ class UrlRepository(context: Context) {
         }
     }
 
+    private fun loadAllRemarks(): List<String> {
+        val count = prefs.getInt(KEY_COUNT, 0)
+        return (0 until count).map { i ->
+            prefs.getString("$REMARK_PREFIX$i", "") ?: ""
+        }
+    }
+
+    /** 获取指定 url 的备注，不存在返回空字符串 */
+    fun getRemarkFor(url: String): String {
+        val idx = _urls.value.indexOf(url)
+        return if (idx >= 0) _remarks.value.getOrElse(idx) { "" } else ""
+    }
+
     // ── 写入 ──────────────────────────────────────────────────────────────────
 
     /**
-     * 添加一个链接。若已存在则移到最前；超过上限时删除最旧的。
-     * 返回操作后的列表。
+     * 添加一个链接。若已存在则移到最前（保留原备注）；超过上限时删除最旧的。
      */
     fun addUrl(url: String): List<String> {
-        val current = _urls.value.toMutableList()
-        current.remove(url)          // 去重：先移除旧的
-        current.add(0, url)          // 插到最前（最近使用）
-        if (current.size > MAX_URLS) current.removeAt(current.lastIndex)
-        persist(current)
-        _urls.value = current
-        return current
+        val currentUrls    = _urls.value.toMutableList()
+        val currentRemarks = _remarks.value.toMutableList()
+
+        val existingIdx = currentUrls.indexOf(url)
+        val existingRemark = if (existingIdx >= 0) {
+            currentRemarks.getOrElse(existingIdx) { "" }.also {
+                currentUrls.removeAt(existingIdx)
+                if (existingIdx < currentRemarks.size) currentRemarks.removeAt(existingIdx)
+            }
+        } else ""
+
+        currentUrls.add(0, url)
+        currentRemarks.add(0, existingRemark)
+
+        if (currentUrls.size > MAX_URLS) {
+            currentUrls.removeAt(currentUrls.lastIndex)
+            currentRemarks.removeAt(currentRemarks.lastIndex)
+        }
+        persist(currentUrls, currentRemarks)
+        _urls.value    = currentUrls
+        _remarks.value = currentRemarks
+        return currentUrls
     }
 
     /**
-     * 删除指定链接。
+     * 删除指定链接（同时删除对应备注）。
      */
     fun removeUrl(url: String): List<String> {
-        val current = _urls.value.toMutableList()
-        current.remove(url)
-        persist(current)
-        _urls.value = current
-        return current
+        val currentUrls    = _urls.value.toMutableList()
+        val currentRemarks = _remarks.value.toMutableList()
+        val idx = currentUrls.indexOf(url)
+        if (idx >= 0) {
+            currentUrls.removeAt(idx)
+            if (idx < currentRemarks.size) currentRemarks.removeAt(idx)
+        }
+        persist(currentUrls, currentRemarks)
+        _urls.value    = currentUrls
+        _remarks.value = currentRemarks
+        return currentUrls
+    }
+
+    /**
+     * 保存/更新指定链接的备注。
+     */
+    fun saveRemark(url: String, remark: String) {
+        val currentUrls    = _urls.value.toMutableList()
+        val currentRemarks = _remarks.value.toMutableList()
+        val idx = currentUrls.indexOf(url)
+        if (idx < 0) return
+        while (currentRemarks.size <= idx) currentRemarks.add("")
+        currentRemarks[idx] = remark.trim()
+        persist(currentUrls, currentRemarks)
+        _remarks.value = currentRemarks
     }
 
     // ── 持久化 ────────────────────────────────────────────────────────────────
 
-    private fun persist(list: List<String>) {
+    private fun persist(urls: List<String>, remarks: List<String>) {
         prefs.edit().apply {
-            // 先清空旧 key
             val oldCount = prefs.getInt(KEY_COUNT, 0)
-            for (i in 0 until oldCount) remove("$KEY_PREFIX$i")
-            // 写入新数据
-            putInt(KEY_COUNT, list.size)
-            list.forEachIndexed { i, url -> putString("$KEY_PREFIX$i", url) }
+            for (i in 0 until oldCount) {
+                remove("$KEY_PREFIX$i")
+                remove("$REMARK_PREFIX$i")
+            }
+            putInt(KEY_COUNT, urls.size)
+            urls.forEachIndexed { i, url ->
+                putString("$KEY_PREFIX$i", url)
+                putString("$REMARK_PREFIX$i", remarks.getOrElse(i) { "" })
+            }
             apply()
         }
     }

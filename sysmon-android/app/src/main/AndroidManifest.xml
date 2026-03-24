@@ -8,7 +8,7 @@
 
     <!-- 前台服务：保持后台运行 -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- FOREGROUND_SERVICE_DATA_SYNC 仅 API 34+ 需要，低版本无此权限 -->
 
     <!-- 防止 CPU 休眠（WakeLock） -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
@@ -47,8 +47,7 @@
         <service
             android:name=".service.SysMonForegroundService"
             android:exported="false"
-            android:stopWithTask="false"
-            android:foregroundServiceType="dataSync" />
+            android:stopWithTask="false" />
 
         <!-- 网速小组件 -->
         <receiver

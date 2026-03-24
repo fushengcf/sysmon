@@ -7,9 +7,11 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
 import androidx.core.app.NotificationCompat
+import androidx.core.app.ServiceCompat
 import com.sysmon.monitor.MainActivity
 import com.sysmon.monitor.R
 
@@ -53,7 +55,8 @@ class SysMonForegroundService : Service() {
         when (intent?.action) {
             ACTION_STOP -> {
                 releaseWakeLock()
-                stopForeground(STOP_FOREGROUND_REMOVE)
+                // STOP_FOREGROUND_REMOVE 是 API 24+，低版本用 ServiceCompat
+                ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
                 stopSelf()
                 return START_NOT_STICKY
             }
@@ -88,18 +91,20 @@ class SysMonForegroundService : Service() {
     // ── 通知 ──────────────────────────────────────────────────────────────────
 
     private fun createNotificationChannel() {
-        val channel = NotificationChannel(
-            CHANNEL_ID,
-            "SysMon 后台监控",
-            NotificationManager.IMPORTANCE_LOW   // LOW = 无声音，不打扰用户
-        ).apply {
-            description = "保持 WebSocket 连接，实时推送系统指标"
-            setShowBadge(false)
-            // 禁止系统在省电模式下降低此通知优先级
-            lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+        // NotificationChannel 是 API 26+，低版本无需创建
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                CHANNEL_ID,
+                "SysMon 后台监控",
+                NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                description = "保持 WebSocket 连接，实时推送系统指标"
+                setShowBadge(false)
+                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+            }
+            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            nm.createNotificationChannel(channel)
         }
-        val nm = getSystemService(NotificationManager::class.java)
-        nm.createNotificationChannel(channel)
     }
 
     private fun buildNotification(): Notification {
@@ -116,10 +121,15 @@ class SysMonForegroundService : Service() {
             .setContentText("正在监控系统指标，保持后台连接")
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentIntent(tapIntent)
-            .setOngoing(true)               // 不可被用户滑动删除
-            .setSilent(true)                // 静默，不发出声音/震动
+            .setOngoing(true)
+            .setSilent(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
-            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
+            // FOREGROUND_SERVICE_IMMEDIATE 是 API 31+，低版本不设置也没有影响
+            .apply {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
+                }
+            }
             .build()
     }
 

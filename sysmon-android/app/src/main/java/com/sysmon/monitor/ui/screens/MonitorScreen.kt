@@ -3,6 +3,8 @@ package com.sysmon.monitor.ui.screens
 import androidx.compose.animation.*
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.*
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -17,6 +19,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -53,7 +56,9 @@ fun MonitorScreen(vm: MonitorViewModel = viewModel()) {
     val netTxHistory   by vm.netTxHistory.collectAsStateWithLifecycle()
     val wsUrl          by vm.wsUrl.collectAsStateWithLifecycle()
     val savedUrls      by vm.savedUrls.collectAsStateWithLifecycle()
+    val savedRemarks   by vm.savedRemarks.collectAsStateWithLifecycle()
     val autoConnecting by vm.autoConnecting.collectAsStateWithLifecycle()
+    val connectedUrl   by vm.connectedUrl.collectAsStateWithLifecycle()
 
     LaunchedEffect(wsState) {
         if (wsState is WsState.Connected) vm.saveCurrentUrl()
@@ -84,12 +89,14 @@ fun MonitorScreen(vm: MonitorViewModel = viewModel()) {
                     wsUrl          = wsUrl,
                     wsState        = wsState,
                     savedUrls      = savedUrls,
+                    savedRemarks   = savedRemarks,
                     autoConnecting = autoConnecting,
                     onUrlChange    = vm::updateUrl,
                     onConnect      = vm::connect,
                     onDisconnect   = vm::disconnect,
                     onConnectTo    = vm::connectTo,
                     onRemoveUrl    = vm::removeUrl,
+                    onSaveRemark   = vm::saveRemark,
                 )
                 Page.CHART -> ChartPage(
                     wsState      = wsState,
@@ -98,7 +105,12 @@ fun MonitorScreen(vm: MonitorViewModel = viewModel()) {
                     memHistory   = memHistory,
                     netRxHistory = netRxHistory,
                     netTxHistory = netTxHistory,
+                    connectedUrl = connectedUrl,
+                    savedUrls    = savedUrls,
+                    savedRemarks = savedRemarks,
                     onDisconnect = vm::disconnect,
+                    onSwipePrev  = vm::switchToPrevUrl,
+                    onSwipeNext  = vm::switchToNextUrl,
                 )
             }
         }
@@ -114,12 +126,14 @@ private fun ConnectPage(
     wsUrl: String,
     wsState: WsState,
     savedUrls: List<String>,
+    savedRemarks: List<String>,
     autoConnecting: Boolean,
     onUrlChange: (String) -> Unit,
     onConnect: () -> Unit,
     onDisconnect: () -> Unit,
     onConnectTo: (String) -> Unit,
     onRemoveUrl: (String) -> Unit,
+    onSaveRemark: (String, String) -> Unit,
 ) {
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(
@@ -137,8 +151,13 @@ private fun ConnectPage(
             )
             if (savedUrls.isNotEmpty()) {
                 SavedUrlsCard(
-                    urls = savedUrls, currentUrl = wsUrl, wsState = wsState,
-                    onConnectTo = onConnectTo, onRemove = onRemoveUrl,
+                    urls         = savedUrls,
+                    remarks      = savedRemarks,
+                    currentUrl   = wsUrl,
+                    wsState      = wsState,
+                    onConnectTo  = onConnectTo,
+                    onRemove     = onRemoveUrl,
+                    onSaveRemark = onSaveRemark,
                 )
             }
             Spacer(Modifier.height(8.dp))
@@ -258,14 +277,27 @@ private fun ConnectionCard(
     }
 }
 
+// ── 已保存链接卡片（支持备注编辑）────────────────────────────────────────────
+
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun SavedUrlsCard(
-    urls: List<String>, currentUrl: String, wsState: WsState,
-    onConnectTo: (String) -> Unit, onRemove: (String) -> Unit,
+    urls: List<String>,
+    remarks: List<String>,
+    currentUrl: String,
+    wsState: WsState,
+    onConnectTo: (String) -> Unit,
+    onRemove: (String) -> Unit,
+    onSaveRemark: (String, String) -> Unit,
 ) {
     val isConnected = wsState is WsState.Connected
     val isBusy      = wsState is WsState.Connecting
     val shape       = RoundedCornerShape(20.dp)
+
+    // 当前正在编辑备注的 url
+    var editingUrl    by remember { mutableStateOf<String?>(null) }
+    var editingText   by remember { mutableStateOf("") }
+    val focusManager  = LocalFocusManager.current
 
     Column(
         modifier = Modifier
@@ -282,28 +314,131 @@ private fun SavedUrlsCard(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween) {
             CardLabel(label = "SAVED  ${urls.size}/10", color = MemPurple)
-            Text("点击快速连接", color = TextMuted, fontSize = 9.sp, fontFamily = FontFamily.Monospace)
+            Text("点击连接  长按编辑备注", color = TextMuted, fontSize = 9.sp, fontFamily = FontFamily.Monospace)
         }
-        urls.forEach { url ->
+
+        urls.forEachIndexed { idx, url ->
             val isActive = url == currentUrl && isConnected
-            Row(
+            val remark   = remarks.getOrElse(idx) { "" }
+
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(8.dp))
                     .background(if (isActive) MemPurple.copy(alpha = 0.12f) else BgSlate.copy(alpha = 0.4f))
-                    .clickable(enabled = !isConnected && !isBusy) { onConnectTo(url) }
-                    .padding(horizontal = 10.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Box(modifier = Modifier.size(6.dp).background(
-                    if (isActive) LiveGreen else TextMuted, CircleShape))
-                Text(url, color = if (isActive) LiveGreen else TextSecondary,
-                    fontSize = 11.sp, fontFamily = FontFamily.Monospace,
-                    maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                if (!isActive) {
-                    Icon(Icons.Default.Close, "删除", tint = TextMuted,
-                        modifier = Modifier.size(16.dp).clickable { onRemove(url) })
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .combinedClickable(
+                            enabled = !isConnected && !isBusy,
+                            onClick = { onConnectTo(url) },
+                            onLongClick = {
+                                editingUrl  = url
+                                editingText = remark
+                            }
+                        )
+                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Box(modifier = Modifier.size(6.dp).background(
+                        if (isActive) LiveGreen else TextMuted, CircleShape))
+
+                    Column(modifier = Modifier.weight(1f)) {
+                        // 备注行（有备注时显示）
+                        if (remark.isNotEmpty()) {
+                            Text(
+                                text = remark,
+                                color = MemPurple,
+                                fontSize = 10.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        Text(
+                            text = url,
+                            color = if (isActive) LiveGreen else TextSecondary,
+                            fontSize = 11.sp,
+                            fontFamily = FontFamily.Monospace,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+
+                    // 编辑备注图标
+                    Icon(
+                        Icons.Default.Edit, "编辑备注",
+                        tint = TextMuted.copy(alpha = 0.5f),
+                        modifier = Modifier.size(14.dp).clickable {
+                            editingUrl  = url
+                            editingText = remark
+                        }
+                    )
+
+                    if (!isActive) {
+                        Icon(Icons.Default.Close, "删除", tint = TextMuted,
+                            modifier = Modifier.size(16.dp).clickable { onRemove(url) })
+                    }
+                }
+
+                // 内联备注编辑框
+                if (editingUrl == url) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(BgCard)
+                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = editingText,
+                            onValueChange = { editingText = it },
+                            placeholder = { Text("输入备注（如：家里Mac）", color = TextMuted, fontSize = 11.sp,
+                                fontFamily = FontFamily.Monospace) },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                            keyboardActions = KeyboardActions(onDone = {
+                                onSaveRemark(url, editingText)
+                                editingUrl = null
+                                focusManager.clearFocus()
+                            }),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor   = MemPurple,
+                                unfocusedBorderColor = BorderColor,
+                                focusedTextColor     = TextPrimary,
+                                unfocusedTextColor   = TextPrimary,
+                                cursorColor          = MemPurple,
+                            ),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.weight(1f),
+                            textStyle = LocalTextStyle.current.copy(
+                                fontFamily = FontFamily.Monospace, fontSize = 11.sp)
+                        )
+                        // 确认
+                        IconButton(
+                            onClick = {
+                                onSaveRemark(url, editingText)
+                                editingUrl = null
+                                focusManager.clearFocus()
+                            },
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(Icons.Default.Check, "保存", tint = MemPurple,
+                                modifier = Modifier.size(18.dp))
+                        }
+                        // 取消
+                        IconButton(
+                            onClick = { editingUrl = null; focusManager.clearFocus() },
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(Icons.Default.Close, "取消", tint = TextMuted,
+                                modifier = Modifier.size(18.dp))
+                        }
+                    }
                 }
             }
         }
@@ -311,7 +446,7 @@ private fun SavedUrlsCard(
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// 图表页
+// 图表页（支持左右滑动切换链接）
 // ══════════════════════════════════════════════════════════════════════════════
 
 @Composable
@@ -322,26 +457,55 @@ private fun ChartPage(
     memHistory: List<Float>,
     netRxHistory: List<Double>,
     netTxHistory: List<Double>,
+    connectedUrl: String,
+    savedUrls: List<String>,
+    savedRemarks: List<String>,
     onDisconnect: () -> Unit,
+    onSwipePrev: () -> Unit,
+    onSwipeNext: () -> Unit,
 ) {
-    // 整页无 padding，各卡片自带内边距
+    // 当前连接的备注
+    val connectedIdx = savedUrls.indexOf(connectedUrl)
+    val connectedRemark = if (connectedIdx >= 0) savedRemarks.getOrElse(connectedIdx) { "" } else ""
+
+    // 水平拖拽检测：累计偏移超过阈值才触发切换，避免误触
+    var dragAccum by remember { mutableStateOf(0f) }
+    val swipeThreshold = 80f
+
     Row(
         modifier = Modifier
             .fillMaxSize()
+            .pointerInput(savedUrls.size) {
+                detectHorizontalDragGestures(
+                    onDragStart  = { dragAccum = 0f },
+                    onDragEnd    = { dragAccum = 0f },
+                    onDragCancel = { dragAccum = 0f },
+                    onHorizontalDrag = { change, dragAmount ->
+                        change.consume()
+                        dragAccum += dragAmount
+                        when {
+                            dragAccum >  swipeThreshold -> { onSwipePrev(); dragAccum = 0f }
+                            dragAccum < -swipeThreshold -> { onSwipeNext(); dragAccum = 0f }
+                        }
+                    }
+                )
+            }
             .padding(horizontal = 10.dp, vertical = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         // 列1：网速图（含顶部 Header 行）
         NetworkCard(
-            rxKbps       = metrics?.netRxKbps ?: 0.0,
-            txKbps       = metrics?.netTxKbps ?: 0.0,
-            rxHistory    = netRxHistory,
-            txHistory    = netTxHistory,
-            onDisconnect = onDisconnect,
-            modifier     = Modifier.weight(5f).fillMaxHeight()
+            rxKbps          = metrics?.netRxKbps ?: 0.0,
+            txKbps          = metrics?.netTxKbps ?: 0.0,
+            rxHistory       = netRxHistory,
+            txHistory       = netTxHistory,
+            connectedRemark = connectedRemark,
+            savedUrlsCount  = savedUrls.size,
+            onDisconnect    = onDisconnect,
+            modifier        = Modifier.weight(5f).fillMaxHeight()
         )
 
-        // 列2：CPU（上）+ MEM（下），各占一半
+        // 列2：CPU（上）+ MEM（下）
         Column(
             modifier = Modifier.weight(3f).fillMaxHeight(),
             verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -370,19 +534,18 @@ private fun ChartPage(
 }
 
 // ─── 网速卡片 ─────────────────────────────────────────────────────────────────
-// 布局：顶部 Header 行（NETWORK 标签 + LIVE + DISC + 图例）
-//       中间 面积图（weight(1f) 占满剩余）
-//       底部 数值行（固定高度）
 
 @Composable
 private fun NetworkCard(
     rxKbps: Double, txKbps: Double,
     rxHistory: List<Double>, txHistory: List<Double>,
+    connectedRemark: String,
+    savedUrlsCount: Int,
     onDisconnect: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     GlassCard(modifier = modifier, accentColor = NetAmber, glowAlignment = GlowAlignment.TopRight) {
-        // ── 顶部 Header 行：标签 + LIVE + DISC + 图例
+        // ── 顶部 Header 行
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
@@ -391,7 +554,7 @@ private fun NetworkCard(
             // NETWORK 标签
             CardLabel(label = "NETWORK", color = NetAmber)
 
-            // LIVE 胶囊
+            // 备注-LIVE 胶囊（有备注时显示备注，否则只显示 LIVE）
             Row(
                 modifier = Modifier
                     .clip(CircleShape)
@@ -401,8 +564,15 @@ private fun NetworkCard(
                 horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 Box(modifier = Modifier.size(5.dp).background(LiveGreen, CircleShape))
-                Text("LIVE", color = LiveGreen, fontSize = 9.sp,
-                    fontWeight = FontWeight.SemiBold, fontFamily = FontFamily.Monospace)
+                Text(
+                    text = if (connectedRemark.isNotEmpty()) "$connectedRemark-LIVE" else "LIVE",
+                    color = LiveGreen,
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    fontFamily = FontFamily.Monospace,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
             }
 
             // DISC 按钮
@@ -424,6 +594,19 @@ private fun NetworkCard(
 
             Spacer(Modifier.weight(1f))
 
+            // 多链接时显示滑动提示
+            if (savedUrlsCount > 1) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    Text("◀", color = TextMuted.copy(alpha = 0.5f), fontSize = 8.sp)
+                    Text("滑动切换", color = TextMuted.copy(alpha = 0.5f), fontSize = 8.sp,
+                        fontFamily = FontFamily.Monospace)
+                    Text("▶", color = TextMuted.copy(alpha = 0.5f), fontSize = 8.sp)
+                }
+            }
+
             // 图例
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 LegendItem(color = NetAmber, label = "RX", arrow = "↓")
@@ -433,7 +616,7 @@ private fun NetworkCard(
 
         Spacer(Modifier.height(6.dp))
 
-        // ── 面积图：占满剩余高度（weight(1f)）
+        // ── 面积图
         DualLineChart(
             rxData   = rxHistory,
             txData   = txHistory,
@@ -442,7 +625,7 @@ private fun NetworkCard(
 
         Spacer(Modifier.height(8.dp))
 
-        // ── 底部数值行：固定高度，不随图表变化
+        // ── 底部数值行
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -462,7 +645,6 @@ private fun NetworkCard(
 }
 
 // ─── CPU 仪表卡片 ─────────────────────────────────────────────────────────────
-// 布局：左侧竖排标题 | 右侧仪表盘占满
 
 @Composable
 private fun CpuCard(
@@ -471,19 +653,13 @@ private fun CpuCard(
 ) {
     GlassCard(modifier = modifier, accentColor = CpuGreen, glowAlignment = GlowAlignment.TopLeft) {
         Row(modifier = Modifier.fillMaxSize()) {
-            // 左侧：竖排标题（旋转 -90°）
             VerticalLabel(label = "CPU", color = CpuGreen)
-
-            // 右侧：仪表盘占满，强制正方形
             BoxWithConstraints(
                 modifier = Modifier.weight(1f).fillMaxHeight(),
                 contentAlignment = Alignment.Center
             ) {
                 val gaugeSize = minOf(maxWidth, maxHeight)
-                Box(
-                    modifier = Modifier.size(gaugeSize),
-                    contentAlignment = Alignment.Center
-                ) {
+                Box(modifier = Modifier.size(gaugeSize), contentAlignment = Alignment.Center) {
                     GaugeChart(
                         value            = value,
                         color            = CpuGreen,
@@ -492,14 +668,9 @@ private fun CpuCard(
                         modifier         = Modifier.fillMaxSize()
                     )
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(
-                            text = "${value.roundToInt()}",
-                            color = CpuGreen,
-                            fontSize = 30.sp,
-                            fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace,
-                            lineHeight = 30.sp
-                        )
+                        Text(text = "${value.roundToInt()}", color = CpuGreen,
+                            fontSize = 30.sp, fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace, lineHeight = 30.sp)
                         Text(text = "%", color = TextSecondary, fontSize = 12.sp)
                     }
                 }
@@ -509,7 +680,6 @@ private fun CpuCard(
 }
 
 // ─── 内存仪表卡片 ─────────────────────────────────────────────────────────────
-// 布局：左侧竖排标题 | 右侧仪表盘 + 底部进度条
 
 @Composable
 private fun MemCard(
@@ -518,24 +688,17 @@ private fun MemCard(
 ) {
     GlassCard(modifier = modifier, accentColor = MemPurple, glowAlignment = GlowAlignment.TopRight) {
         Row(modifier = Modifier.fillMaxSize()) {
-            // 左侧：竖排标题
             VerticalLabel(label = "MEM", color = MemPurple)
-
-            // 右侧：仪表盘 + 进度条
             Column(
                 modifier = Modifier.weight(1f).fillMaxHeight(),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // 仪表盘占满剩余高度
                 BoxWithConstraints(
                     modifier = Modifier.fillMaxWidth().weight(1f),
                     contentAlignment = Alignment.Center
                 ) {
                     val gaugeSize = minOf(maxWidth, maxHeight)
-                    Box(
-                        modifier = Modifier.size(gaugeSize),
-                        contentAlignment = Alignment.Center
-                    ) {
+                    Box(modifier = Modifier.size(gaugeSize), contentAlignment = Alignment.Center) {
                         GaugeChart(
                             value            = value,
                             color            = MemPurple,
@@ -544,38 +707,23 @@ private fun MemCard(
                             modifier         = Modifier.fillMaxSize()
                         )
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text(
-                                text = "${value.roundToInt()}",
-                                color = MemPurple,
-                                fontSize = 30.sp,
-                                fontWeight = FontWeight.Bold,
-                                fontFamily = FontFamily.Monospace,
-                                lineHeight = 30.sp
-                            )
+                            Text(text = "${value.roundToInt()}", color = MemPurple,
+                                fontSize = 30.sp, fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace, lineHeight = 30.sp)
                             Text(text = "%", color = TextSecondary, fontSize = 12.sp)
                         }
                     }
                 }
-
-                // 已用/总量文字
                 if (totalMb > 0) {
                     Text(
                         text = "${formatMb(usedMb)} / ${formatMb(totalMb)}",
-                        color = TextSecondary,
-                        fontSize = 9.sp,
-                        fontFamily = FontFamily.Monospace,
-                        textAlign = TextAlign.Center,
+                        color = TextSecondary, fontSize = 9.sp,
+                        fontFamily = FontFamily.Monospace, textAlign = TextAlign.Center,
                         modifier = Modifier.fillMaxWidth()
                     )
                     Spacer(Modifier.height(4.dp))
                 }
-
-                // 进度条
-                MemProgressBar(
-                    percent  = value,
-                    modifier = Modifier.fillMaxWidth(),
-                    height   = 7.dp
-                )
+                MemProgressBar(percent = value, modifier = Modifier.fillMaxWidth(), height = 7.dp)
             }
         }
     }
@@ -584,10 +732,7 @@ private fun MemCard(
 // ─── 多核卡片 ─────────────────────────────────────────────────────────────────
 
 @Composable
-private fun CoresCard(
-    cores: List<Float>,
-    modifier: Modifier = Modifier,
-) {
+private fun CoresCard(cores: List<Float>, modifier: Modifier = Modifier) {
     GlassCard(modifier = modifier, accentColor = CoreCyan, glowAlignment = GlowAlignment.TopRight) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -601,18 +746,11 @@ private fun CoresCard(
                     .background(CoreCyan.copy(alpha = 0.15f))
                     .padding(horizontal = 8.dp, vertical = 2.dp)
             ) {
-                Text(
-                    text = "${cores.size}c",
-                    color = CoreCyan,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    fontFamily = FontFamily.Monospace
-                )
+                Text(text = "${cores.size}c", color = CoreCyan, fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold, fontFamily = FontFamily.Monospace)
             }
         }
-
         Spacer(Modifier.height(8.dp))
-
         Column(
             modifier = Modifier.fillMaxWidth().weight(1f),
             verticalArrangement = Arrangement.SpaceEvenly
@@ -623,13 +761,8 @@ private fun CoresCard(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    Text(
-                        text = "C$i",
-                        color = TextSecondary,
-                        fontSize = 9.sp,
-                        fontFamily = FontFamily.Monospace,
-                        modifier = Modifier.width(18.dp)
-                    )
+                    Text(text = "C$i", color = TextSecondary, fontSize = 9.sp,
+                        fontFamily = FontFamily.Monospace, modifier = Modifier.width(18.dp))
                     Box(modifier = Modifier.weight(1f).height(18.dp)) {
                         CoreBarChart(coreValues = listOf(v), modifier = Modifier.fillMaxSize())
                     }
@@ -640,8 +773,7 @@ private fun CoresCard(
                             v > 20f -> CoreBlue
                             else    -> TextSecondary
                         },
-                        fontSize = 9.sp,
-                        fontFamily = FontFamily.Monospace,
+                        fontSize = 9.sp, fontFamily = FontFamily.Monospace,
                         modifier = Modifier.width(26.dp)
                     )
                 }
@@ -650,40 +782,25 @@ private fun CoresCard(
     }
 }
 
-// ─── 竖排标题（左侧旋转文字）─────────────────────────────────────────────────
+// ─── 竖排标题 ─────────────────────────────────────────────────────────────────
 
 @Composable
 private fun VerticalLabel(label: String, color: Color) {
     Box(
-        modifier = Modifier
-            .fillMaxHeight()
-            .width(22.dp),
+        modifier = Modifier.fillMaxHeight().width(22.dp),
         contentAlignment = Alignment.Center
     ) {
-        // 用 Column 竖向逐字排列，避免 rotate 导致的布局问题
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
             modifier = Modifier.fillMaxHeight()
         ) {
-            // 色点
-            Box(
-                modifier = Modifier
-                    .size(6.dp)
-                    .background(color, CircleShape)
-            )
+            Box(modifier = Modifier.size(6.dp).background(color, CircleShape))
             Spacer(Modifier.height(6.dp))
-            // 逐字竖排
             label.forEach { ch ->
-                Text(
-                    text = ch.toString(),
-                    color = color,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    fontFamily = FontFamily.Monospace,
-                    letterSpacing = 0.sp,
-                    lineHeight = 14.sp
-                )
+                Text(text = ch.toString(), color = color, fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace,
+                    letterSpacing = 0.sp, lineHeight = 14.sp)
             }
         }
     }
@@ -693,10 +810,7 @@ private fun VerticalLabel(label: String, color: Color) {
 
 @Composable
 private fun CompactSpeedRow(
-    label: String,
-    value: String,
-    unit: String,
-    color: Color,
+    label: String, value: String, unit: String, color: Color,
     modifier: Modifier = Modifier,
 ) {
     Row(
@@ -705,21 +819,10 @@ private fun CompactSpeedRow(
         horizontalArrangement = Arrangement.spacedBy(4.dp)
     ) {
         Box(modifier = Modifier.size(7.dp).background(color, CircleShape))
-        Text(text = label, color = TextSecondary, fontSize = 11.sp,
-            fontFamily = FontFamily.Monospace)
-        Text(
-            text = value,
-            color = Color.White,
-            fontSize = 18.sp,
-            fontWeight = FontWeight.Bold,
-            fontFamily = FontFamily.Monospace
-        )
-        Text(
-            text = unit,
-            color = TextSecondary,
-            fontSize = 10.sp,
-            fontFamily = FontFamily.Monospace
-        )
+        Text(text = label, color = TextSecondary, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+        Text(text = value, color = Color.White, fontSize = 18.sp,
+            fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+        Text(text = unit, color = TextSecondary, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
     }
 }
 

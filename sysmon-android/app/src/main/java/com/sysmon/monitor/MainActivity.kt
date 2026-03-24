@@ -47,10 +47,13 @@ class MainActivity : ComponentActivity() {
                             requestedOrientation =
                                 ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
                             window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-                            // 启动前台服务，保持后台运行
-                            startForegroundService(
-                                SysMonForegroundService.startIntent(this@MainActivity)
-                            )
+                            // startForegroundService 是 API 26+，低版本用 startService
+                            val fgIntent = SysMonForegroundService.startIntent(this@MainActivity)
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                startForegroundService(fgIntent)
+                            } else {
+                                startService(fgIntent)
+                            }
                         }
                         else -> {
                             // 恢复自由旋转 + 取消常亮
@@ -89,7 +92,9 @@ class MainActivity : ComponentActivity() {
 
     private fun hideSystemBars() {
         WindowInsetsControllerCompat(window, window.decorView).apply {
+            // 同时隐藏状态栏和导航栏（底部菜单栏）
             hide(WindowInsetsCompat.Type.systemBars())
+            hide(WindowInsetsCompat.Type.navigationBars())
             systemBarsBehavior =
                 WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         }
