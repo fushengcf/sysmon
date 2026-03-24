@@ -170,6 +170,7 @@ pub mod macos {
     }
 
     /// 显示停止状态
+    #[allow(dead_code)]
     pub fn show_stopped() {
         *CURRENT_RX.lock().unwrap() = "↓  --".to_string();
         *CURRENT_TX.lock().unwrap() = "↑  --".to_string();

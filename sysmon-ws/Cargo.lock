@@ -2719,6 +2719,7 @@ dependencies = [
  "tracing-subscriber",
  "tray-icon",
  "tungstenite",
+ "winapi",
  "winit",
 ]
 
