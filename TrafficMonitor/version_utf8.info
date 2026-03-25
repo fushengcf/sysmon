@@ -1,0 +1,24 @@
+﻿<root>
+	<version>1.85.1</version>
+	<GitHub>
+		<link>https://github.com/zhongyang219/TrafficMonitor/releases/download/V1.85.1/TrafficMonitor_V1.85.1_x86.zip</link>
+		<link_x64>https://github.com/zhongyang219/TrafficMonitor/releases/download/V1.85.1/TrafficMonitor_V1.85.1_x64.zip</link_x64>
+		<link_arm64ec>https://github.com/zhongyang219/TrafficMonitor/releases/download/V1.85.1/TrafficMonitor_V1.85.1_arm64ec.zip</link_arm64ec>
+		<link_without_temperature>https://github.com/zhongyang219/TrafficMonitor/releases/download/V1.85.1/TrafficMonitor_V1.85.1_x86_Lite.zip</link_without_temperature>
+		<link_without_temperature_x64>https://github.com/zhongyang219/TrafficMonitor/releases/download/V1.85.1/TrafficMonitor_V1.85.1_x64_Lite.zip</link_without_temperature_x64>
+		<link_without_temperature_arm64ec>https://github.com/zhongyang219/TrafficMonitor/releases/download/V1.85.1/TrafficMonitor_V1.85.1_arm64ec_Lite.zip</link_without_temperature_arm64ec>
+	</GitHub>
+	<Gitee>
+		<link>https://gitee.com/zhongyang219/TrafficMonitor/releases/download/V1.85.1/TrafficMonitor_V1.85.1_x86.zip</link>
+		<link_x64>https://gitee.com/zhongyang219/TrafficMonitor/releases/download/V1.85.1/TrafficMonitor_V1.85.1_x64.zip</link_x64>
+		<link_arm64ec>https://gitee.com/zhongyang219/TrafficMonitor/releases/download/V1.85.1/TrafficMonitor_V1.85.1_arm64ec.zip</link_arm64ec>
+		<link_without_temperature>https://gitee.com/zhongyang219/TrafficMonitor/releases/download/V1.85.1/TrafficMonitor_V1.85.1_x86_Lite.zip</link_without_temperature>
+		<link_without_temperature_x64>https://gitee.com/zhongyang219/TrafficMonitor/releases/download/V1.85.1/TrafficMonitor_V1.85.1_x64_Lite.zip</link_without_temperature_x64>
+		<link_without_temperature_arm64ec>https://gitee.com/zhongyang219/TrafficMonitor/releases/download/V1.85.1/TrafficMonitor_V1.85.1_arm64ec_Lite.zip</link_without_temperature_arm64ec>
+	</Gitee>
+	<update_contents>
+		<contents_zh_cn>修正Windows11下使用第三方软件改成旧版任务栏时，任务栏窗口设置中“任务栏窗口显示在任务栏左侧”选项不可用的问题\n修正当任务栏上没有任何图标时任务栏窗口的位置不正确的问题\n修正任务栏窗口设置中点击“应用”时网速数据宽度不生效的问题\n任务栏设置中Windows11相关设置移动到单独的对话框中，增加避免与右侧小组件重叠的选项\n修正未启用硬件监控中的CPU监控时，CPU使用率获取方式改成使用性能计数器后，会改回基于CPU使用时间的问题\n修正鸣谢界面有乱码的问题\n修正当监控时间间隔设置得过小时，显示的网速可能会大于实际网速问题\n修正当内存超过100G时显示任务栏剩余内存显示不全的问题</contents_zh_cn>
+		<contents_en>Fixed the problem that when using third-party software to change to the classical taskbar in Windows 11, the option "Taskbar window appears to the left of the taskbar" in the Taskbar Window Settings is not available.\nFixed the problem that the position of the taskbar windows is not correct when there is no any icon on the taskbar.\nFixed the problem that the "Network speed data width" does not take effect when clicking "Apply" in the Taskbar Window Settings.\nWindows 11 related settings in Taskbar Windows Settings moved to the new dialog. Add an option to avoid overlapping with right Widgets.\nFixed the problem that when "CPU" in Hardware Monitoring is not enabled, the "CPU usage acquisition method" will be changed back to the "Based on CPU time" when set it to "Use the performance counter".\nFixed the problem of messy charactors in the acknowledgement dialog.\nFixed the problem that the displayed net speed may be larger than the actual net speed when the "Monitoring intervals" is set too small.\nFixed the problem that the "Memory available" in the taskbar window cannot be fully displayed when the memory exceeds 100G.</contents_en>
+		<contents_zh_tw>修正Windows11下使用第三方軟體改成舊版工作列時，工作列視窗設定中“工作列視窗顯示在工作列左側”選項不可用的問題\n修正當工作列上沒有任何圖示時工作列視窗的位置不正確的問題\n修正工作列視窗設定中點選“應用”時網速資料寬度不生效的問題\n工作列設定中Windows11相關設定移動到單獨的對話方塊中，增加避免與右側小元件重疊的選項\n修正未啟用硬體監控中的CPU監控時，CPU使用率獲取方式改成使用效能計數器後，會改回基於CPU使用時間的問題\n修正鳴謝介面有亂碼的問題\n修正當監控時間間隔設定得過小時，顯示的網速可能會大於實際網速問題\n修正當記憶體超過100G時顯示工作列剩餘記憶體顯示不全的問題</contents_zh_tw>
+	</update_contents>
+</root>

@@ -86,17 +86,18 @@ fun MonitorScreen(vm: MonitorViewModel = viewModel()) {
         ) { page ->
             when (page) {
                 Page.CONNECT -> ConnectPage(
-                    wsUrl          = wsUrl,
-                    wsState        = wsState,
-                    savedUrls      = savedUrls,
-                    savedRemarks   = savedRemarks,
-                    autoConnecting = autoConnecting,
-                    onUrlChange    = vm::updateUrl,
-                    onConnect      = vm::connect,
-                    onDisconnect   = vm::disconnect,
-                    onConnectTo    = vm::connectTo,
-                    onRemoveUrl    = vm::removeUrl,
-                    onSaveRemark   = vm::saveRemark,
+                    wsUrl              = wsUrl,
+                    wsState            = wsState,
+                    savedUrls          = savedUrls,
+                    savedRemarks       = savedRemarks,
+                    autoConnecting     = autoConnecting,
+                    onUrlChange        = vm::updateUrl,
+                    onConnect          = vm::connect,
+                    onDisconnect       = vm::disconnect,
+                    onCancelConnect    = vm::cancelAutoConnect,
+                    onConnectTo        = vm::connectTo,
+                    onRemoveUrl        = vm::removeUrl,
+                    onSaveRemark       = vm::saveRemark,
                 )
                 Page.CHART -> ChartPage(
                     wsState      = wsState,
@@ -131,6 +132,7 @@ private fun ConnectPage(
     onUrlChange: (String) -> Unit,
     onConnect: () -> Unit,
     onDisconnect: () -> Unit,
+    onCancelConnect: () -> Unit,
     onConnectTo: (String) -> Unit,
     onRemoveUrl: (String) -> Unit,
     onSaveRemark: (String, String) -> Unit,
@@ -148,6 +150,7 @@ private fun ConnectPage(
             ConnectionCard(
                 wsUrl = wsUrl, wsState = wsState, autoConnecting = autoConnecting,
                 onUrlChange = onUrlChange, onConnect = onConnect, onDisconnect = onDisconnect,
+                onCancelConnect = onCancelConnect,
             )
             if (savedUrls.isNotEmpty()) {
                 SavedUrlsCard(
@@ -198,6 +201,7 @@ private fun ConnectPageHeader(wsState: WsState, autoConnecting: Boolean) {
 private fun ConnectionCard(
     wsUrl: String, wsState: WsState, autoConnecting: Boolean,
     onUrlChange: (String) -> Unit, onConnect: () -> Unit, onDisconnect: () -> Unit,
+    onCancelConnect: () -> Unit,
 ) {
     val focusManager = LocalFocusManager.current
     val isConnected  = wsState is WsState.Connected
@@ -241,33 +245,68 @@ private fun ConnectionCard(
             Text("⚠ ${wsState.message}", color = DangerRed, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
         }
 
-        Button(
-            onClick = { if (isConnected) onDisconnect() else onConnect() },
-            enabled = !isBusy,
-            modifier = Modifier.fillMaxWidth().height(44.dp),
-            shape = RoundedCornerShape(12.dp),
-            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 0.dp),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = if (isConnected) DangerRed.copy(alpha = 0.15f) else NeonBlueFade,
-                contentColor   = if (isConnected) DangerRed else NeonBlue,
-                disabledContainerColor = BorderColor, disabledContentColor = TextMuted
-            ),
-            border = BorderStroke(1.dp,
-                if (isConnected) DangerRed.copy(alpha = 0.5f) else NeonBlue.copy(alpha = 0.5f))
-        ) {
-            when {
-                isBusy -> {
-                    CircularProgressIndicator(modifier = Modifier.size(16.dp), color = WarnOrange, strokeWidth = 2.dp)
-                    Spacer(Modifier.width(8.dp))
-                    Text(if (autoConnecting) "AUTO CONNECTING..." else "CONNECTING...",
-                        fontFamily = FontFamily.Monospace, fontSize = 12.sp)
+        // 连接中：连接按钮（禁用）+ 取消按钮；其他状态：单个按钮
+        if (isBusy) {
+            Row(
+                modifier = Modifier.fillMaxWidth().height(44.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                // 连接中状态显示（禁用）
+                Button(
+                    onClick = {},
+                    enabled = false,
+                    modifier = Modifier.weight(1f).fillMaxHeight(),
+                    shape = RoundedCornerShape(12.dp),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        disabledContainerColor = BorderColor,
+                        disabledContentColor   = TextMuted
+                    )
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(14.dp), color = WarnOrange, strokeWidth = 2.dp)
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        if (autoConnecting) "AUTO CONNECTING..." else "CONNECTING...",
+                        fontFamily = FontFamily.Monospace, fontSize = 11.sp,
+                        maxLines = 1
+                    )
                 }
-                isConnected -> {
+                // 取消按钮
+                Button(
+                    onClick = onCancelConnect,
+                    modifier = Modifier.width(88.dp).fillMaxHeight(),
+                    shape = RoundedCornerShape(12.dp),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = DangerRed.copy(alpha = 0.15f),
+                        contentColor   = DangerRed
+                    ),
+                    border = BorderStroke(1.dp, DangerRed.copy(alpha = 0.5f))
+                ) {
+                    Icon(Icons.Default.Close, null, modifier = Modifier.size(14.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("CANCEL", fontFamily = FontFamily.Monospace, fontSize = 11.sp)
+                }
+            }
+        } else {
+            Button(
+                onClick = { if (isConnected) onDisconnect() else onConnect() },
+                modifier = Modifier.fillMaxWidth().height(44.dp),
+                shape = RoundedCornerShape(12.dp),
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 0.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (isConnected) DangerRed.copy(alpha = 0.15f) else NeonBlueFade,
+                    contentColor   = if (isConnected) DangerRed else NeonBlue,
+                ),
+                border = BorderStroke(1.dp,
+                    if (isConnected) DangerRed.copy(alpha = 0.5f) else NeonBlue.copy(alpha = 0.5f))
+            ) {
+                if (isConnected) {
                     Icon(Icons.Default.LinkOff, null, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(6.dp))
                     Text("DISCONNECT", fontFamily = FontFamily.Monospace, fontSize = 12.sp)
-                }
-                else -> {
+                } else {
                     Icon(Icons.Default.Link, null, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(6.dp))
                     Text("CONNECT", fontFamily = FontFamily.Monospace, fontSize = 12.sp)

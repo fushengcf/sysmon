@@ -8,7 +8,8 @@
 
     <!-- 前台服务：保持后台运行 -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <!-- FOREGROUND_SERVICE_DATA_SYNC 仅 API 34+ 需要，低版本无此权限 -->
+    <!-- Android 14+ 必须声明具体类型权限 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 
     <!-- 防止 CPU 休眠（WakeLock） -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
@@ -36,7 +37,9 @@
             android:exported="true"
             android:screenOrientation="fullSensor"
             android:configChanges="orientation|screenSize|screenLayout"
-            android:windowSoftInputMode="adjustResize">
+            android:windowSoftInputMode="adjustResize"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -44,10 +47,12 @@
         </activity>
 
         <!-- 前台服务：保持 WebSocket 后台长连接 -->
+        <!-- Android 14+ 必须声明 foregroundServiceType，否则 MissingForegroundServiceTypeException 崩溃 -->
         <service
             android:name=".service.SysMonForegroundService"
             android:exported="false"
-            android:stopWithTask="false" />
+            android:stopWithTask="false"
+            android:foregroundServiceType="dataSync" />
 
         <!-- 网速小组件 -->
         <receiver

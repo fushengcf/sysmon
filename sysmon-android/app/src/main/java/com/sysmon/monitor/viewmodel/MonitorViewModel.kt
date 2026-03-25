@@ -1,12 +1,14 @@
 package com.sysmon.monitor.viewmodel
 
 import android.app.Application
+import android.content.Intent
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.sysmon.monitor.data.model.SystemMetrics
 import com.sysmon.monitor.data.repository.UrlRepository
 import com.sysmon.monitor.data.websocket.SysMonWebSocket
 import com.sysmon.monitor.data.websocket.WsState
+import com.sysmon.monitor.service.SysMonForegroundService
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -51,15 +53,20 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
     private val _autoConnecting = MutableStateFlow(false)
     val autoConnecting: StateFlow<Boolean> = _autoConnecting.asStateFlow()
 
+    // 重连任务：唯一实例，所有重连逻辑都走这个 Job
     private var autoConnectJob: Job? = null
 
     // 用户主动断开标志：为 true 时禁止自动重连，直到用户主动发起连接
     private var manuallyDisconnected = false
 
+    // 是否曾经成功连接过：只有连接成功过后断线，才触发熄屏逻辑
+    // 首次启动找不到连接时不熄屏（避免看起来像闪退）
+    private var hasEverConnected = false
+
     companion object {
         private const val MAX_HISTORY          = 60
-        private const val AUTO_CONNECT_TIMEOUT = 5_000L
-        private const val RECONNECT_INTERVAL   = 8_000L
+        private const val AUTO_CONNECT_TIMEOUT = 2_000L   // 单个 URL 连接超时 2s
+        private const val RECONNECT_INTERVAL   = 30_000L  // 全部失败后 30s 重试一次
     }
 
     init {
@@ -74,23 +81,23 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
             }
         }
 
-        // 监听连接状态：记录已连接 URL；断线后自动重试
+        // 监听连接状态
         viewModelScope.launch {
             wsClient.state.collect { state ->
                 when (state) {
-                    is WsState.Connected -> _connectedUrl.value = _wsUrl.value
-                    is WsState.Error, is WsState.Disconnected -> {
-                        // 用户主动断开时不自动重连
-                        if (!manuallyDisconnected &&
-                            !_autoConnecting.value &&
-                            urlRepo.urls.value.isNotEmpty()) {
-                            delay(RECONNECT_INTERVAL)
-                            if (!manuallyDisconnected &&
-                                !_autoConnecting.value &&
-                                wsClient.state.value !is WsState.Connected &&
-                                wsClient.state.value !is WsState.Connecting) {
-                                tryAutoConnect()
-                            }
+                    is WsState.Connected -> {
+                        _connectedUrl.value = _wsUrl.value
+                        // 曾断线后重连成功 → 亮屏（首次连接屏幕本来就是亮的，不需要）
+                        if (hasEverConnected) {
+                            broadcastScreenOn()
+                        }
+                        hasEverConnected = true
+                    }
+                    is WsState.Disconnected, is WsState.Error -> {
+                        // 只有曾经连接成功过、且不是用户主动断开、且当前没有重连任务在跑
+                        // 才触发断线重连循环
+                        if (hasEverConnected && !manuallyDisconnected && !_autoConnecting.value) {
+                            startReconnectLoop()
                         }
                     }
                     else -> {}
@@ -98,40 +105,90 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
             }
         }
 
+        // App 启动时尝试自动连接
         tryAutoConnect()
     }
 
-    // ── 自动连接 ───────────────────────────────────────────────────────────────
+    // ── 重连主循环 ─────────────────────────────────────────────────────────────
+    // 规则：
+    //   1. 遍历所有已保存链接，每条最多等待 AUTO_CONNECT_TIMEOUT
+    //   2. 若其中任意一条成功 → 退出循环；若是断线重连（hasEverConnected==true）则发亮屏广播
+    //   3. 若全部失败：
+    //      - 断线重连（hasEverConnected==true）→ 发熄屏广播，等 30s 再重试
+    //      - 首次启动未连接过（hasEverConnected==false）→ 不熄屏，直接停止（界面留在前台供用户操作）
+    //   4. manuallyDisconnected==true 则立刻停止
 
-    private fun tryAutoConnect() {
+    private fun startReconnectLoop() {
+        // 防止重复启动
+        if (_autoConnecting.value) return
         val urls = urlRepo.urls.value
         if (urls.isEmpty()) return
         if (wsClient.state.value is WsState.Connected) return
 
+        // 记录进入循环时是否已曾连接过（断线重连 vs 首次启动）
+        val isReconnect = hasEverConnected
+
         autoConnectJob?.cancel()
         autoConnectJob = viewModelScope.launch {
             _autoConnecting.value = true
-            for (url in urls) {
-                if (wsClient.state.value is WsState.Connected) break
-                _wsUrl.value = url
-                wsClient.connect(url)
-                val deadline = System.currentTimeMillis() + AUTO_CONNECT_TIMEOUT
-                while (System.currentTimeMillis() < deadline) {
-                    val state = wsClient.state.value
-                    if (state is WsState.Connected) break
-                    if (state is WsState.Error || state is WsState.Disconnected) break
-                    delay(200)
+
+            outer@ while (!manuallyDisconnected) {
+                val currentUrls = urlRepo.urls.value
+                if (currentUrls.isEmpty()) break
+
+                for (url in currentUrls) {
+                    if (manuallyDisconnected) break@outer
+                    if (wsClient.state.value is WsState.Connected) break@outer
+
+                    _wsUrl.value = url
+                    wsClient.connect(url)
+
+                    // 等待连接结果（最多 AUTO_CONNECT_TIMEOUT）
+                    val deadline = System.currentTimeMillis() + AUTO_CONNECT_TIMEOUT
+                    while (System.currentTimeMillis() < deadline) {
+                        val s = wsClient.state.value
+                        if (s is WsState.Connected) break
+                        if (s is WsState.Error || s is WsState.Disconnected) break
+                        delay(200)
+                    }
+
+                    if (wsClient.state.value is WsState.Connected) break@outer
+
+                    // 当前 URL 失败，断开后尝试下一个
+                    wsClient.disconnect()
+                    delay(300)
                 }
-                if (wsClient.state.value is WsState.Connected) break
-                wsClient.disconnect()
-                delay(300)
+
+                if (wsClient.state.value is WsState.Connected) break@outer
+
+                // ── 所有链接均失败 ────────────────────────────────────────────
+                if (isReconnect) {
+                    // 断线重连失败 → 熄屏退后台，30s 后继续重试
+                    broadcastScreenOff()
+                    var waited = 0L
+                    while (waited < RECONNECT_INTERVAL && !manuallyDisconnected) {
+                        delay(1_000)
+                        waited += 1_000
+                    }
+                } else {
+                    // 首次启动未连接过 → 不熄屏，停止自动尝试，界面留在前台
+                    break@outer
+                }
             }
+
             _autoConnecting.value = false
         }
     }
 
+    // ── 自动连接（首次启动 / onResume 时调用） ─────────────────────────────────
+
+    private fun tryAutoConnect() {
+        if (urlRepo.urls.value.isEmpty()) return
+        if (wsClient.state.value is WsState.Connected) return
+        startReconnectLoop()
+    }
+
     fun retryAutoConnect() {
-        // 用户主动断开后，onResume 不触发自动重连
         if (manuallyDisconnected) return
         if (wsClient.state.value is WsState.Connected ||
             wsClient.state.value is WsState.Connecting ||
@@ -144,18 +201,25 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
     fun updateUrl(url: String) { _wsUrl.value = url }
 
     fun connect() {
-        manuallyDisconnected = false   // 主动连接，清除手动断开标志
+        manuallyDisconnected = false
         autoConnectJob?.cancel()
         _autoConnecting.value = false
         wsClient.connect(_wsUrl.value)
     }
 
     fun disconnect() {
-        manuallyDisconnected = true    // 标记为用户主动断开，禁止自动重连
+        manuallyDisconnected = true   // 标记手动断开，永不自动重连
         autoConnectJob?.cancel()
         _autoConnecting.value = false
         wsClient.disconnect()
         clearHistory()
+    }
+
+    /** 取消正在进行的自动连接（不标记 manuallyDisconnected，后续可继续自动重连） */
+    fun cancelAutoConnect() {
+        autoConnectJob?.cancel()
+        _autoConnecting.value = false
+        wsClient.disconnect()
     }
 
     fun saveCurrentUrl() {
@@ -166,7 +230,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
     fun removeUrl(url: String) { urlRepo.removeUrl(url) }
 
     fun connectTo(url: String) {
-        manuallyDisconnected = false   // 主动选择链接，清除手动断开标志
+        manuallyDisconnected = false
         autoConnectJob?.cancel()
         _autoConnecting.value = false
         _wsUrl.value = url
@@ -205,6 +269,22 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         _memHistory.value   = emptyList()
         _netRxHistory.value = emptyList()
         _netTxHistory.value = emptyList()
+    }
+
+    // ── 屏幕控制广播 ──────────────────────────────────────────────────────────
+
+    private fun broadcastScreenOff() {
+        val ctx = getApplication<Application>()
+        ctx.sendBroadcast(Intent(SysMonForegroundService.ACTION_SCREEN_OFF).apply {
+            setPackage(ctx.packageName)
+        })
+    }
+
+    private fun broadcastScreenOn() {
+        val ctx = getApplication<Application>()
+        ctx.sendBroadcast(Intent(SysMonForegroundService.ACTION_SCREEN_ON).apply {
+            setPackage(ctx.packageName)
+        })
     }
 
     override fun onCleared() {

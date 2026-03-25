@@ -1,6 +1,10 @@
 package com.sysmon.monitor
 
+import android.app.KeyguardManager
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.ActivityInfo
 import android.net.Uri
 import android.os.Build
@@ -29,6 +33,20 @@ class MainActivity : ComponentActivity() {
 
     private val vm: MonitorViewModel by viewModels()
 
+    /**
+     * 屏幕控制广播接收器：
+     *  - ACTION_SCREEN_OFF → 取消 FLAG_KEEP_SCREEN_ON，退到后台让屏幕正常超时熄灭
+     *  - ACTION_SCREEN_ON  → 强制点亮屏幕并将 Activity 带回前台
+     */
+    private val screenControlReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            when (intent?.action) {
+                SysMonForegroundService.ACTION_SCREEN_OFF -> applyScreenOff()
+                SysMonForegroundService.ACTION_SCREEN_ON  -> applyScreenOn()
+            }
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -36,6 +54,21 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         WindowCompat.setDecorFitsSystemWindows(window, false)
         hideSystemBars()
+
+        // 支持在锁屏上显示 Activity 并点亮屏幕（API 27+ 用方法，旧版用 Flag）
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            setShowWhenLocked(true)
+            setTurnScreenOn(true)
+        } else {
+            @Suppress("DEPRECATION")
+            window.addFlags(
+                WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
+            )
+        }
+
+        // 注册屏幕控制广播（仅接收本应用内广播）
+        registerScreenReceiver()
 
         // 监听连接状态
         lifecycleScope.launch {
@@ -47,7 +80,7 @@ class MainActivity : ComponentActivity() {
                             requestedOrientation =
                                 ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
                             window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-                            // startForegroundService 是 API 26+，低版本用 startService
+                            // 启动前台服务
                             val fgIntent = SysMonForegroundService.startIntent(this@MainActivity)
                             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                                 startForegroundService(fgIntent)
@@ -56,17 +89,17 @@ class MainActivity : ComponentActivity() {
                             }
                         }
                         else -> {
-                            // 恢复自由旋转 + 取消常亮
+                            // 断开/重连中：恢复自由旋转
+                            // FLAG_KEEP_SCREEN_ON 的清除交由 applyScreenOff() 在全部失败后执行
                             requestedOrientation =
                                 ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR
-                            window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                         }
                     }
                 }
             }
         }
 
-        // 首次启动时请求忽略电池优化（静默引导，不强制）
+        // 首次启动时请求忽略电池优化
         requestIgnoreBatteryOptimizations()
 
         setContent {
@@ -78,21 +111,84 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        // 每次回到前台时重新隐藏系统栏（防止从后台切回后状态栏重新出现）
         hideSystemBars()
-        // 如果未连接则重新尝试自动连接列表
         vm.retryAutoConnect()
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
-        // 窗口重新获得焦点时（如弹窗关闭后）再次隐藏系统栏
         if (hasFocus) hideSystemBars()
     }
 
+    override fun onDestroy() {
+        try { unregisterReceiver(screenControlReceiver) } catch (_: Exception) {}
+        super.onDestroy()
+    }
+
+    // ── 屏幕控制 ──────────────────────────────────────────────────────────────
+
+    /**
+     * 所有 WS 链接均失败 → 取消常亮标志，退到后台让屏幕正常超时熄灭。
+     * 进程和 Service 的 PARTIAL_WAKE_LOCK 依然持有，CPU 不会休眠。
+     */
+    private fun applyScreenOff() {
+        window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        moveTaskToBack(true)
+    }
+
+    /**
+     * 任意 WS 链接重连成功 → 点亮屏幕并将界面带回前台。
+     * 使用 PowerManager.FULL_WAKE_LOCK + ACQUIRE_CAUSES_WAKEUP 强制唤醒屏幕。
+     * FULL_WAKE_LOCK 虽已废弃，但在 Android 15 上对于前台应用依然有效；
+     * API 27+ 同时借助 setTurnScreenOn(true) + requestDismissKeyguard() 解锁。
+     */
+    @Suppress("DEPRECATION")
+    private fun applyScreenOn() {
+        // 1. 恢复常亮标志
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+
+        // 2. 用 FULL_WAKE_LOCK + ACQUIRE_CAUSES_WAKEUP 唤醒屏幕（短暂持有 2s）
+        val pm = getSystemService(PowerManager::class.java)
+        val wl = pm.newWakeLock(
+            PowerManager.FULL_WAKE_LOCK or
+            PowerManager.ACQUIRE_CAUSES_WAKEUP or
+            PowerManager.ON_AFTER_RELEASE,
+            "SysMon::ScreenWakeUp"
+        )
+        wl.acquire(2_000L)  // 2s 后自动释放，FLAG_KEEP_SCREEN_ON 接管
+
+        // 3. API 27+ 请求解除锁屏
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            val km = getSystemService(KeyguardManager::class.java)
+            km?.requestDismissKeyguard(this, null)
+        }
+
+        // 4. 将 Activity 带回前台
+        val intent = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or
+                    Intent.FLAG_ACTIVITY_NEW_TASK
+        }
+        startActivity(intent)
+    }
+
+    // ── 广播注册 ──────────────────────────────────────────────────────────────
+
+    private fun registerScreenReceiver() {
+        val filter = IntentFilter().apply {
+            addAction(SysMonForegroundService.ACTION_SCREEN_OFF)
+            addAction(SysMonForegroundService.ACTION_SCREEN_ON)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(screenControlReceiver, filter, RECEIVER_NOT_EXPORTED)
+        } else {
+            registerReceiver(screenControlReceiver, filter)
+        }
+    }
+
+    // ── 系统栏隐藏 ────────────────────────────────────────────────────────────
+
     private fun hideSystemBars() {
         WindowInsetsControllerCompat(window, window.decorView).apply {
-            // 同时隐藏状态栏和导航栏（底部菜单栏）
             hide(WindowInsetsCompat.Type.systemBars())
             hide(WindowInsetsCompat.Type.navigationBars())
             systemBarsBehavior =
@@ -100,23 +196,14 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    override fun onDestroy() {
-        super.onDestroy()
-        // Activity 销毁时不停止服务，让服务继续在后台保持连接
-    }
+    // ── 电池优化 ──────────────────────────────────────────────────────────────
 
-    /**
-     * 请求系统忽略本应用的电池优化。
-     * Android 6+ 需要此权限才能在 Doze 模式下保持网络活跃。
-     * 仅在尚未被豁免时弹出系统设置页面引导用户授权。
-     */
     private fun requestIgnoreBatteryOptimizations() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return
         val pm = getSystemService(PowerManager::class.java) ?: return
-        if (pm.isIgnoringBatteryOptimizations(packageName)) return   // 已豁免，无需再次请求
+        if (pm.isIgnoringBatteryOptimizations(packageName)) return
 
         try {
-            // 直接跳转到本应用的电池优化设置页（无需额外权限）
             val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
                 data = Uri.parse("package:$packageName")
             }

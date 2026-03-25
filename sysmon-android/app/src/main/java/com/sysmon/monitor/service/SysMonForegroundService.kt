@@ -7,6 +7,7 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
@@ -24,14 +25,25 @@ import com.sysmon.monitor.R
  *  3. START_STICKY → 被系统杀死后自动重启（系统资源充足时）
  *  4. onTaskRemoved() 重启自身 → 用户划掉任务卡片后也能恢复
  *  5. 通知优先级 PRIORITY_MAX + 持久化 → 减少被系统降级的概率
+ *
+ * 屏幕控制：
+ *  - ACTION_SCREEN_OFF：熄灭屏幕（WS 全部断连时）
+ *  - ACTION_SCREEN_ON ：点亮屏幕（WS 重连成功时）
+ *  两个 action 均通过广播通知 MainActivity，由 Activity 层完成 FLAG_KEEP_SCREEN_ON 的切换。
  */
 class SysMonForegroundService : Service() {
 
     companion object {
         const val CHANNEL_ID      = "sysmon_fg_channel"
         const val NOTIFICATION_ID = 1001
-        const val ACTION_START    = "com.sysmon.monitor.START_FG"
-        const val ACTION_STOP     = "com.sysmon.monitor.STOP_FG"
+
+        const val ACTION_START      = "com.sysmon.monitor.START_FG"
+        const val ACTION_STOP       = "com.sysmon.monitor.STOP_FG"
+
+        /** 熄屏广播：发给 MainActivity，让其取消 FLAG_KEEP_SCREEN_ON */
+        const val ACTION_SCREEN_OFF = "com.sysmon.monitor.SCREEN_OFF"
+        /** 亮屏广播：发给 MainActivity，让其重新添加 FLAG_KEEP_SCREEN_ON 并 wakeUp */
+        const val ACTION_SCREEN_ON  = "com.sysmon.monitor.SCREEN_ON"
 
         fun startIntent(context: Context) =
             Intent(context, SysMonForegroundService::class.java).apply {
@@ -55,30 +67,31 @@ class SysMonForegroundService : Service() {
         when (intent?.action) {
             ACTION_STOP -> {
                 releaseWakeLock()
-                // STOP_FOREGROUND_REMOVE 是 API 24+，低版本用 ServiceCompat
                 ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
                 stopSelf()
                 return START_NOT_STICKY
             }
             else -> {
-                // 立即进入前台，避免 ANR
-                startForeground(NOTIFICATION_ID, buildNotification())
+                // Android 14 (API 34)+ 必须传入 foregroundServiceType，否则抛 MissingForegroundServiceTypeException
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                    startForeground(
+                        NOTIFICATION_ID,
+                        buildNotification(),
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+                    )
+                } else {
+                    startForeground(NOTIFICATION_ID, buildNotification())
+                }
                 acquireWakeLock()
             }
         }
-        // START_STICKY：被系统杀死后自动重启，intent 为 null
         return START_STICKY
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    /**
-     * 用户从最近任务划掉 App 时触发。
-     * 重新发送 startIntent 让服务在短暂停止后自动重启。
-     */
     override fun onTaskRemoved(rootIntent: Intent?) {
         super.onTaskRemoved(rootIntent)
-        // 重新启动服务（延迟 1s 避免系统节流）
         val restartIntent = startIntent(applicationContext)
         startService(restartIntent)
     }
@@ -91,7 +104,6 @@ class SysMonForegroundService : Service() {
     // ── 通知 ──────────────────────────────────────────────────────────────────
 
     private fun createNotificationChannel() {
-        // NotificationChannel 是 API 26+，低版本无需创建
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
@@ -124,7 +136,6 @@ class SysMonForegroundService : Service() {
             .setOngoing(true)
             .setSilent(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
-            // FOREGROUND_SERVICE_IMMEDIATE 是 API 31+，低版本不设置也没有影响
             .apply {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                     setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
@@ -142,7 +153,6 @@ class SysMonForegroundService : Service() {
             PowerManager.PARTIAL_WAKE_LOCK,
             "SysMon::WsKeepAlive"
         ).also {
-            // 无限期持有，直到手动释放（服务停止时释放）
             it.acquire(0L)
         }
     }

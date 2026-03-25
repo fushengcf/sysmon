@@ -1,8 +1,8 @@
 /// statusbar_view.rs — macOS 状态栏两行网速 View
 ///
 /// 效果（等宽字体，跟随系统颜色）：
-///   140K/s   ← 下行
-///     6K/s   ← 上行
+///     6K/s   ← 上行（上半行）
+///   140K/s   ← 下行（下半行）
 ///
 /// 注意：setView: 之后 setMenu: 不再自动弹出菜单，
 ///       需在 mouseDown: 里手动调用 popUpStatusItemMenu:
@@ -84,10 +84,10 @@ pub mod macos {
 
             let line_h = h / 2.0;
 
-            // 上半行：下行速度（↓）
-            draw_attributed_string(&rx, font, color, para, 0.0, line_h, bounds.size.width);
-            // 下半行：上行速度（↑）
-            draw_attributed_string(&tx, font, color, para, 0.0, 0.0, bounds.size.width);
+            // 上半行：上行速度（TX，无箭头）
+            draw_attributed_string(&tx, font, color, para, 0.0, line_h, bounds.size.width);
+            // 下半行：下行速度（RX，无箭头）
+            draw_attributed_string(&rx, font, color, para, 0.0, 0.0, bounds.size.width);
         }
     }
 
@@ -141,12 +141,12 @@ pub mod macos {
         // 注意：setView: 之后 setMenu: 不再生效，改为在 mouseDown: 里手动弹出
         // 这里不调用 setMenu:，避免干扰
 
-        // 创建自定义 view（宽 72pt，高 22pt）
+        // 创建自定义 view（宽 64pt，高 22pt）
         let cls = register_class();
         let view: id = msg_send![cls, alloc];
         let frame = NSRect {
             origin: NSPoint { x: 0.0, y: 0.0 },
-            size: NSSize { width: 72.0, height: 22.0 },
+            size: NSSize { width: 64.0, height: 22.0 },
         };
         let view: id = msg_send![view, initWithFrame: frame];
         let _: () = msg_send![view, retain];
@@ -156,23 +156,23 @@ pub mod macos {
         VIEW_PTR.store(view as *mut Object, Ordering::SeqCst);
 
         // 初始文字
-        *CURRENT_RX.lock().unwrap() = format_speed_line("↓", 0.0);
-        *CURRENT_TX.lock().unwrap() = format_speed_line("↑", 0.0);
+        *CURRENT_RX.lock().unwrap() = format_speed_line(0.0);
+        *CURRENT_TX.lock().unwrap() = format_speed_line(0.0);
 
         item
     }
 
     /// 更新网速并触发重绘
     pub fn update_speed(rx_kbps: f64, tx_kbps: f64) {
-        *CURRENT_RX.lock().unwrap() = format_speed_line("↓", rx_kbps);
-        *CURRENT_TX.lock().unwrap() = format_speed_line("↑", tx_kbps);
+        *CURRENT_RX.lock().unwrap() = format_speed_line(rx_kbps);
+        *CURRENT_TX.lock().unwrap() = format_speed_line(tx_kbps);
         redraw();
     }
 
     /// 显示停止状态
     pub fn show_stopped() {
-        *CURRENT_RX.lock().unwrap() = "↓  --".to_string();
-        *CURRENT_TX.lock().unwrap() = "↑  --".to_string();
+        *CURRENT_RX.lock().unwrap() = "    --".to_string();
+        *CURRENT_TX.lock().unwrap() = "    --".to_string();
         redraw();
     }
 
@@ -185,13 +185,13 @@ pub mod macos {
         }
     }
 
-    /// 格式化单行网速，右对齐固定 7 字符
-    /// 示例："↓ 140K/s"  "↑   6K/s"  "↓ 1.2M/s"
-    fn format_speed_line(arrow: &str, kbps: f64) -> String {
+    /// 格式化单行网速，右对齐（无箭头前缀）
+    /// 示例：" 140K/s"  "   6K/s"  " 1.2M/s"
+    fn format_speed_line(kbps: f64) -> String {
         if kbps >= 1024.0 {
-            format!("{} {:>5.1}M/s", arrow, kbps / 1024.0)
+            format!("{:>6.1}M/s", kbps / 1024.0)
         } else {
-            format!("{} {:>5.0}K/s", arrow, kbps)
+            format!("{:>6.0}K/s", kbps)
         }
     }
 }
