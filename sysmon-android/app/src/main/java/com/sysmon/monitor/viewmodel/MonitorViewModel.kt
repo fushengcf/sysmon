@@ -119,6 +119,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
     /** 切换到指定 URL（静默换连，不触发熄屏逻辑） */
     fun connectTo(url: String) {
         _wsUrl.value = url
+        _connectedUrl.value = url
         clearHistory()
         sendToService(SysMonForegroundService.ACTION_RECONNECT, url)
     }
@@ -142,21 +143,36 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
     fun switchToPrevUrl() {
         val urls = urlRepo.urls.value
         if (urls.size < 2) return
-        val idx = urls.indexOf(_connectedUrl.value)
-        connectTo(urls[if (idx <= 0) urls.lastIndex else idx - 1])
+        val baseUrl = currentSwitchBaseUrl(urls)
+        val idx = urls.indexOf(baseUrl)
+        val target = urls[if (idx <= 0) urls.lastIndex else idx - 1]
+        connectTo(target)
     }
 
     fun switchToNextUrl() {
         val urls = urlRepo.urls.value
         if (urls.size < 2) return
-        val idx = urls.indexOf(_connectedUrl.value)
-        connectTo(urls[if (idx < 0 || idx >= urls.lastIndex) 0 else idx + 1])
+        val baseUrl = currentSwitchBaseUrl(urls)
+        val idx = urls.indexOf(baseUrl)
+        val target = urls[if (idx < 0 || idx >= urls.lastIndex) 0 else idx + 1]
+        connectTo(target)
     }
 
     fun saveRemark(url: String, remark: String) { urlRepo.saveRemark(url, remark) }
     fun getRemarkFor(url: String): String = urlRepo.getRemarkFor(url)
 
     // ── 内部工具 ───────────────────────────────────────────────────────────────
+
+
+    private fun currentSwitchBaseUrl(urls: List<String>): String {
+        val pendingUrl = _wsUrl.value
+        if (pendingUrl in urls) return pendingUrl
+
+        val connectedUrl = _connectedUrl.value
+        if (connectedUrl in urls) return connectedUrl
+
+        return urls.first()
+    }
 
     private fun ensureServiceRunning() {
         val ctx = getApplication<Application>()

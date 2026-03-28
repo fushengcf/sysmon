@@ -1,5 +1,4 @@
 package com.sysmon.monitor.ui.screens
-
 import androidx.compose.animation.*
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -516,6 +515,7 @@ private fun ChartPage(
 
     // 水平拖拽检测：累计偏移超过阈值才触发切换，避免误触
     var dragAccum by remember { mutableStateOf(0f) }
+    var swipeTriggered by remember { mutableStateOf(false) }
     val swipeThreshold = 80f
 
     val gpuValue = metrics?.gpuUsagePercent
@@ -526,15 +526,32 @@ private fun ChartPage(
             .fillMaxSize()
             .pointerInput(savedUrls.size) {
                 detectHorizontalDragGestures(
-                    onDragStart  = { dragAccum = 0f },
-                    onDragEnd    = { dragAccum = 0f },
-                    onDragCancel = { dragAccum = 0f },
+                    onDragStart = {
+                        dragAccum = 0f
+                        swipeTriggered = false
+                    },
+                    onDragEnd = {
+                        dragAccum = 0f
+                        swipeTriggered = false
+                    },
+                    onDragCancel = {
+                        dragAccum = 0f
+                        swipeTriggered = false
+                    },
                     onHorizontalDrag = { change, dragAmount ->
                         change.consume()
+                        if (swipeTriggered) return@detectHorizontalDragGestures
+
                         dragAccum += dragAmount
                         when {
-                            dragAccum >  swipeThreshold -> { onSwipePrev(); dragAccum = 0f }
-                            dragAccum < -swipeThreshold -> { onSwipeNext(); dragAccum = 0f }
+                            dragAccum > swipeThreshold -> {
+                                swipeTriggered = true
+                                onSwipePrev()
+                            }
+                            dragAccum < -swipeThreshold -> {
+                                swipeTriggered = true
+                                onSwipeNext()
+                            }
                         }
                     }
                 )

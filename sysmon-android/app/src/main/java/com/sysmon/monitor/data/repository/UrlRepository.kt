@@ -58,26 +58,25 @@ class UrlRepository(context: Context) {
     // ── 写入 ──────────────────────────────────────────────────────────────────
 
     /**
-     * 添加一个链接。若已存在则移到最前（保留原备注）；超过上限时删除最旧的。
+     * 添加一个链接。
+     * 若已存在则保持原顺序不变；只有新链接才追加到列表末尾。
+     * 超过上限时删除最旧的。
      */
     fun addUrl(url: String): List<String> {
         val currentUrls    = _urls.value.toMutableList()
         val currentRemarks = _remarks.value.toMutableList()
 
         val existingIdx = currentUrls.indexOf(url)
-        val existingRemark = if (existingIdx >= 0) {
-            currentRemarks.getOrElse(existingIdx) { "" }.also {
-                currentUrls.removeAt(existingIdx)
-                if (existingIdx < currentRemarks.size) currentRemarks.removeAt(existingIdx)
-            }
-        } else ""
+        if (existingIdx >= 0) {
+            return currentUrls
+        }
 
-        currentUrls.add(0, url)
-        currentRemarks.add(0, existingRemark)
+        currentUrls.add(url)
+        currentRemarks.add("")
 
         if (currentUrls.size > MAX_URLS) {
-            currentUrls.removeAt(currentUrls.lastIndex)
-            currentRemarks.removeAt(currentRemarks.lastIndex)
+            currentUrls.removeAt(0)
+            currentRemarks.removeAt(0)
         }
         persist(currentUrls, currentRemarks)
         _urls.value    = currentUrls
