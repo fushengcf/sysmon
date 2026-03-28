@@ -1,6 +1,7 @@
 package com.sysmon.monitor.data.websocket
 
 import android.content.Context
+import android.util.Log
 import androidx.datastore.preferences.core.MutablePreferences
 import androidx.glance.appwidget.GlanceAppWidgetManager
 import androidx.glance.appwidget.state.updateAppWidgetState
@@ -23,8 +24,13 @@ import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicLong
 
 class SysMonWebSocket(private val context: Context? = null) {
+
+    companion object {
+        private const val TAG = "SysMonWS"
+    }
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(5, TimeUnit.SECONDS)
@@ -33,6 +39,10 @@ class SysMonWebSocket(private val context: Context? = null) {
 
     private val gson = Gson()
     private var webSocket: WebSocket? = null
+
+    // 每次建立新连接时递增；Listener 捕获创建时的 generation，
+    // 回调时对比当前值，不匹配则说明是旧连接残留，直接丢弃。
+    private val generation = AtomicLong(0)
 
     // 协程作用域：用于写入 Glance DataStore
     private val widgetScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -43,48 +53,86 @@ class SysMonWebSocket(private val context: Context? = null) {
     private val _metrics = MutableStateFlow<SystemMetrics?>(null)
     val metrics: StateFlow<SystemMetrics?> = _metrics
 
+    /**
+     * 切换连接：静默关闭旧 WebSocket（不触发 onClosed/_state 变化），直接发起新连接。
+     * 用于用户主动切换 URL，避免触发断线熄屏逻辑。
+     */
+    fun reconnect(url: String) {
+        // 先递增 generation，令所有旧 Listener 的回调自动失效
+        val gen = generation.incrementAndGet()
+        Log.d(TAG, "reconnect() gen=$gen url=$url")
+        // cancel() 直接终止连接，不触发 onClosed
+        webSocket?.cancel()
+        webSocket = null
+        _metrics.value = null
+        // 状态设为 Connecting，跳过 connect() 里的守卫
+        _state.value = WsState.Connecting
+        val request = Request.Builder().url(url).build()
+        webSocket = client.newWebSocket(request, makeListener(gen))
+    }
+
     fun connect(url: String) {
         if (_state.value is WsState.Connected || _state.value is WsState.Connecting) return
+        val gen = generation.incrementAndGet()
+        Log.d(TAG, "connect() gen=$gen url=$url")
         _state.value = WsState.Connecting
-
         val request = Request.Builder().url(url).build()
-        webSocket = client.newWebSocket(request, object : WebSocketListener() {
+        webSocket = client.newWebSocket(request, makeListener(gen))
+    }
 
-            override fun onOpen(webSocket: WebSocket, response: Response) {
-                _state.value = WsState.Connected
-                updateWidgetState { prefs -> prefs[WidgetStateKeys.CONNECTED] = true }
-            }
+    /**
+     * 生成带 generation 标记的 Listener。
+     * 每个回调都先比对 myGen 与当前 generation，不一致则丢弃，
+     * 彻底杜绝旧连接回调污染新连接状态。
+     */
+    private fun makeListener(myGen: Long) = object : WebSocketListener() {
 
-            override fun onMessage(webSocket: WebSocket, text: String) {
-                try {
-                    val m = gson.fromJson(text, SystemMetrics::class.java)
-                    _metrics.value = m
-                    // 写入 Glance DataStore → 自动触发小组件重组
-                    updateWidgetState { prefs ->
-                        prefs[WidgetStateKeys.NET_RX_KBPS]  = m.netRxKbps.toFloat()
-                        prefs[WidgetStateKeys.NET_TX_KBPS]  = m.netTxKbps.toFloat()
-                        prefs[WidgetStateKeys.CPU_PERCENT]  = m.cpuUsagePercent
-                        prefs[WidgetStateKeys.MEM_PERCENT]  = m.memoryUsagePercent
-                        prefs[WidgetStateKeys.MEM_USED_MB]  = m.memoryUsedMb
-                        prefs[WidgetStateKeys.MEM_TOTAL_MB] = m.memoryTotalMb
-                        prefs[WidgetStateKeys.CONNECTED]    = true
-                    }
-                } catch (_: Exception) { /* 忽略解析错误 */ }
-            }
+        private fun isStale() = generation.get() != myGen
 
-            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                _state.value = WsState.Error(t.message ?: "连接失败")
-                updateWidgetState { prefs -> prefs[WidgetStateKeys.CONNECTED] = false }
-            }
+        override fun onOpen(webSocket: WebSocket, response: Response) {
+            if (isStale()) { Log.d(TAG, "onOpen 忽略(stale gen=$myGen)"); return }
+            Log.d(TAG, "onOpen gen=$myGen")
+            _state.value = WsState.Connected
+            updateWidgetState { prefs -> prefs[WidgetStateKeys.CONNECTED] = true }
+        }
 
-            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                _state.value = WsState.Disconnected
-                updateWidgetState { prefs -> prefs[WidgetStateKeys.CONNECTED] = false }
-            }
-        })
+        override fun onMessage(webSocket: WebSocket, text: String) {
+            if (isStale()) return
+            try {
+                val m = gson.fromJson(text, SystemMetrics::class.java)
+                _metrics.value = m
+                // 写入 Glance DataStore → 自动触发小组件重组
+                updateWidgetState { prefs ->
+                    prefs[WidgetStateKeys.NET_RX_KBPS]  = m.netRxKbps.toFloat()
+                    prefs[WidgetStateKeys.NET_TX_KBPS]  = m.netTxKbps.toFloat()
+                    prefs[WidgetStateKeys.CPU_PERCENT]  = m.cpuUsagePercent
+                    prefs[WidgetStateKeys.MEM_PERCENT]  = m.memoryUsagePercent
+                    prefs[WidgetStateKeys.MEM_USED_MB]  = m.memoryUsedMb
+                    prefs[WidgetStateKeys.MEM_TOTAL_MB] = m.memoryTotalMb
+                    prefs[WidgetStateKeys.CONNECTED]    = true
+                }
+            } catch (_: Exception) { /* 忽略解析错误 */ }
+        }
+
+        override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+            if (isStale()) { Log.d(TAG, "onFailure 忽略(stale gen=$myGen)"); return }
+            Log.d(TAG, "onFailure gen=$myGen ${t.message}")
+            _state.value = WsState.Error(t.message ?: "连接失败")
+            updateWidgetState { prefs -> prefs[WidgetStateKeys.CONNECTED] = false }
+        }
+
+        override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+            if (isStale()) { Log.d(TAG, "onClosed 忽略(stale gen=$myGen)"); return }
+            Log.d(TAG, "onClosed gen=$myGen")
+            _state.value = WsState.Disconnected
+            updateWidgetState { prefs -> prefs[WidgetStateKeys.CONNECTED] = false }
+        }
     }
 
     fun disconnect() {
+        // 递增 generation，令所有在途回调失效
+        val gen = generation.incrementAndGet()
+        Log.d(TAG, "disconnect() gen=$gen")
         webSocket?.close(1000, "用户断开")
         webSocket = null
         _state.value = WsState.Disconnected

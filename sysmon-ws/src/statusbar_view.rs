@@ -68,17 +68,16 @@ pub mod macos {
             let bounds: NSRect = msg_send![this, bounds];
             let h = bounds.size.height; // 通常 22pt
 
-            // 等宽字体 9pt
+            // 系统字体 9pt
             let font: id = msg_send![
                 class!(NSFont),
-                monospacedSystemFontOfSize: 9.0_f64
-                weight: 0.0_f64
+                systemFontOfSize: 9.0_f64
             ];
 
             // 使用系统 labelColor，自动跟随深色/浅色模式（状态栏通常显示为白色）
             let color: id = msg_send![class!(NSColor), labelColor];
 
-            // 段落样式：右对齐
+            // 段落样式：右对齐（文字靠右，view 整体居中于状态栏）
             let para: id = msg_send![class!(NSMutableParagraphStyle), new];
             let _: () = msg_send![para, setAlignment: 2u64]; // NSTextAlignmentRight
 
@@ -141,12 +140,12 @@ pub mod macos {
         // 注意：setView: 之后 setMenu: 不再生效，改为在 mouseDown: 里手动弹出
         // 这里不调用 setMenu:，避免干扰
 
-        // 创建自定义 view（宽 64pt，高 22pt）
+        // 创建自定义 view（宽 35pt，高 22pt）
         let cls = register_class();
         let view: id = msg_send![cls, alloc];
         let frame = NSRect {
             origin: NSPoint { x: 0.0, y: 0.0 },
-            size: NSSize { width: 64.0, height: 22.0 },
+            size: NSSize { width: 40.0, height: 22.0 },
         };
         let view: id = msg_send![view, initWithFrame: frame];
         let _: () = msg_send![view, retain];

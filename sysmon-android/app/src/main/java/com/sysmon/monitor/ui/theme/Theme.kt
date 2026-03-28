@@ -46,6 +46,11 @@ val CoreOrange    = Color(0xFFF97316)   // 极高负载
 val CoreBlue      = Color(0xFF60A5FA)   // 中等负载
 val CoreSlate     = Color(0xFF64748B)   // 低负载
 
+// ── GPU：蓝紫 → 品红（indigo → fuchsia）─────────────────────────────────────
+val GpuIndigo     = Color(0xFF818CF8)   // indigo-400
+val GpuFuchsia    = Color(0xFFE879F9)   // fuchsia-400
+val GpuIndigoFade = Color(0x20818CF8)   // indigo/20
+
 // ── 状态色 ────────────────────────────────────────────────────────────────────
 val LiveGreen     = Color(0xFF34D399)   // emerald-400 LIVE 指示
 val LiveGreenBg   = Color(0x2034D399)   // emerald/20

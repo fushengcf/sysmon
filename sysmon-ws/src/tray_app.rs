@@ -10,6 +10,135 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
+// ─── 配置持久化 ───────────────────────────────────────────────────────────────
+
+/// 获取配置文件路径：~/Library/Application Support/sysmon-ws/config.json
+fn config_path() -> std::path::PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+    let dir = std::path::PathBuf::from(home)
+        .join("Library")
+        .join("Application Support")
+        .join("sysmon-ws");
+    let _ = std::fs::create_dir_all(&dir);
+    dir.join("config.json")
+}
+
+/// 从配置文件读取 ws_enabled，默认 false
+fn load_ws_enabled() -> bool {
+    let path = config_path();
+    if let Ok(content) = std::fs::read_to_string(&path) {
+        // 简单解析：查找 "ws_enabled":true
+        if content.contains("\"ws_enabled\":true") || content.contains("\"ws_enabled\": true") {
+            return true;
+        }
+    }
+    false
+}
+
+/// 将 ws_enabled 状态写入配置文件
+fn save_ws_enabled(enabled: bool) {
+    let path = config_path();
+    let content = format!("{{\"ws_enabled\":{}}}", enabled);
+    let _ = std::fs::write(&path, content);
+}
+
+// ─── 网络工具 ─────────────────────────────────────────────────────────────────
+
+/// 获取本机第一个内网 IPv4 地址（排除 127.x.x.x 和 169.254.x.x）
+/// 使用 macOS 原生 getifaddrs 系统调用，完全同步无阻塞，失败时回退到 "localhost"
+fn get_local_ipv4() -> String {
+    use std::ffi::CStr;
+    use std::os::raw::{c_char, c_int, c_uint, c_void};
+
+    // AF_INET = 2 (macOS/BSD)
+    const AF_INET: u8 = 2;
+
+    // 接口优先级：en0 = Wi-Fi, en1/en2 = 有线/其他
+    const PREFER: &[&str] = &["en0", "en1", "en2", "en3", "eth0", "eth1"];
+
+    #[repr(C)]
+    struct SockAddr {
+        sa_len:    u8,
+        sa_family: u8,
+        sa_data:   [i8; 14],
+    }
+
+    // sockaddr_in: len(1) + family(1) + port(2) + addr(4) + zero(8) = 16 bytes
+    #[repr(C)]
+    struct SockAddrIn {
+        sin_len:    u8,
+        sin_family: u8,
+        sin_port:   u16,
+        sin_addr:   u32,   // network byte order (big-endian)
+        sin_zero:   [u8; 8],
+    }
+
+    #[repr(C)]
+    struct IfAddrs {
+        ifa_next:    *mut IfAddrs,
+        ifa_name:    *const c_char,
+        ifa_flags:   c_uint,
+        ifa_addr:    *mut SockAddr,
+        ifa_netmask: *mut SockAddr,
+        ifa_dstaddr: *mut SockAddr,
+        ifa_data:    *mut c_void,
+    }
+
+    extern "C" {
+        fn getifaddrs(ifap: *mut *mut IfAddrs) -> c_int;
+        fn freeifaddrs(ifap: *mut IfAddrs);
+    }
+
+    unsafe {
+        let mut ifap: *mut IfAddrs = std::ptr::null_mut();
+        if getifaddrs(&mut ifap) != 0 || ifap.is_null() {
+            return "localhost".to_string();
+        }
+
+        let mut candidates: Vec<(String, String)> = Vec::new();
+
+        let mut cur = ifap;
+        while !cur.is_null() {
+            let ifa = &*cur;
+            cur = ifa.ifa_next;
+
+            if ifa.ifa_addr.is_null() { continue; }
+            if (*ifa.ifa_addr).sa_family != AF_INET { continue; }
+
+            let name = CStr::from_ptr(ifa.ifa_name).to_string_lossy().into_owned();
+
+            // 读取 IPv4（网络序 big-endian）
+            let sin = ifa.ifa_addr as *const SockAddrIn;
+            let raw = u32::from_be((*sin).sin_addr);
+            let a = ((raw >> 24) & 0xff) as u8;
+            let b = ((raw >> 16) & 0xff) as u8;
+            let c = ((raw >>  8) & 0xff) as u8;
+            let d = ( raw        & 0xff) as u8;
+
+            // 排除回环（127.x）和链路本地（169.254.x）
+            if a == 127 { continue; }
+            if a == 169 && b == 254 { continue; }
+
+            candidates.push((name, format!("{}.{}.{}.{}", a, b, c, d)));
+        }
+
+        freeifaddrs(ifap);
+
+        // 按优先级返回
+        for prefer in PREFER {
+            if let Some((_, ip)) = candidates.iter().find(|(n, _)| n == prefer) {
+                return ip.clone();
+            }
+        }
+        // 没有优先接口，返回第一个可用地址
+        if let Some((_, ip)) = candidates.into_iter().next() {
+            return ip;
+        }
+    }
+
+    "localhost".to_string()
+}
+
 use winit::event_loop::EventLoopBuilder;
 use winit::platform::macos::{ActivationPolicy, EventLoopBuilderExtMacOS};
 use winit::platform::pump_events::{EventLoopExtPumpEvents, PumpStatus};
@@ -29,9 +158,9 @@ struct AppState {
 }
 
 impl AppState {
-    fn new() -> Self {
+    fn new(ws_enabled: bool) -> Self {
         Self {
-            ws_running: AtomicBool::new(false),
+            ws_running: AtomicBool::new(ws_enabled),
             port: 9001,
             interval_ms: 1000,
         }
@@ -46,7 +175,10 @@ pub fn run() {
         .with_max_level(tracing::Level::INFO)
         .init();
 
-    let state = Arc::new(AppState::new());
+    // 从配置文件读取上次的 ws_enabled 状态，默认 false（关闭）
+    let initial_ws_enabled = load_ws_enabled();
+
+    let state = Arc::new(AppState::new(initial_ws_enabled));
 
     // ── mpsc channel：采集线程 → 主线程 ──────────────────────────────────────
     // 传递 (rx_kbps, tx_kbps, Option<SystemMetrics>)
@@ -97,12 +229,15 @@ pub fn run() {
         });
     }
 
-    // ── 启动 WebSocket 服务 ───────────────────────────────────────────────────
+    // ── 启动 WebSocket 服务（仅当配置启用时）────────────────────────────────
     let port = state.port;
     let interval = state.interval_ms;
-    state.ws_running.store(true, Ordering::SeqCst);
     let mut stop_tx: Option<tokio::sync::oneshot::Sender<()>> =
-        Some(start_server(port, interval, Arc::clone(&conn_count)));
+        if state.ws_running.load(Ordering::SeqCst) {
+            Some(start_server(port, interval, Arc::clone(&conn_count)))
+        } else {
+            None
+        };
 
     // ── winit EventLoop（驱动 Cocoa runloop）─────────────────────────────────
     let mut event_loop = EventLoopBuilder::new()
@@ -113,12 +248,13 @@ pub fn run() {
 
     // ── 构建 NSMenu + 两行状态栏 View（macOS）────────────────────────────────
     #[cfg(target_os = "macos")]
-    let (menu_state, _status_item) = unsafe { build_statusbar(state.port) };
+    let (menu_state, _status_item) = unsafe { build_statusbar(state.port, state.ws_running.load(Ordering::SeqCst)) };
 
     tracing::info!("Tray app started. WebSocket: ws://localhost:{}", state.port);
 
-    // ── UI 节流 ───────────────────────────────────────────────────────────────
+    // ── UI 状态追踪 ─────────────────────────────────────────────────────────────
     let mut last_ui_update = Instant::now() - Duration::from_secs(2);
+    let mut stats_visible = state.ws_running.load(Ordering::SeqCst); // 初始状态
 
     // ── 主事件循环 ────────────────────────────────────────────────────────────
     loop {
@@ -146,7 +282,20 @@ pub fn run() {
                             let _ = tx.send(());
                         }
                         state.ws_running.store(false, Ordering::SeqCst);
+                        save_ws_enabled(false);
                         tracing::info!("WebSocket service stopped by user (net collection continues)");
+                        
+                        // 手动关闭服务时，立即隐藏统计行
+                        unsafe {
+                            set_stats_items_hidden(
+                                menu_state.stats_separator,
+                                menu_state.cpu_item,
+                                menu_state.mem_item,
+                                menu_state.net_item,
+                                true,
+                            );
+                            stats_visible = false;
+                        }
                     } else {
                         let new_stop_tx = start_server(
                             state.port,
@@ -155,7 +304,9 @@ pub fn run() {
                         );
                         stop_tx = Some(new_stop_tx);
                         state.ws_running.store(true, Ordering::SeqCst);
+                        save_ws_enabled(true);
                         tracing::info!("WebSocket service restarted by user");
+                        // 开启服务时不立即显示，等待有连接后再显示
                     }
                     unsafe {
                         update_toggle_text(
@@ -186,34 +337,52 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             sb::update_speed(rx_kbps, tx_kbps);
 
-            // 菜单项：只在 WS 运行且有全量数据时更新
+            // 菜单项动态显示/隐藏：仅在 WS 运行且有活跃连接（full 为 Some）时展示
             #[cfg(target_os = "macos")]
-            if state.ws_running.load(Ordering::SeqCst) {
-                if let Some(snap) = full {
+            {
+                let ws_on = state.ws_running.load(Ordering::SeqCst);
+                let should_show = ws_on && full.is_some();
+
+                if should_show != stats_visible {
                     unsafe {
-                        use cocoa::base::nil;
-                        use cocoa::foundation::NSString;
-                        use objc::{msg_send, sel, sel_impl};
+                        set_stats_items_hidden(
+                            menu_state.stats_separator,
+                            menu_state.cpu_item,
+                            menu_state.mem_item,
+                            menu_state.net_item,
+                            !should_show,
+                        );
+                    }
+                    stats_visible = should_show;
+                }
 
-                        let cpu_str = NSString::alloc(nil).init_str(&format!(
-                            "CPU  {:.1}%",
-                            snap.cpu_usage_percent
-                        ));
-                        let _: () = msg_send![menu_state.cpu_item, setTitle: cpu_str];
+                if should_show {
+                    if let Some(snap) = full {
+                        unsafe {
+                            use cocoa::base::nil;
+                            use cocoa::foundation::NSString;
+                            use objc::{msg_send, sel, sel_impl};
 
-                        let mem_str = NSString::alloc(nil).init_str(&format!(
-                            "MEM  {:.1}%  ({}/{} MB)",
-                            snap.memory_usage_percent,
-                            snap.memory_used_mb,
-                            snap.memory_total_mb
-                        ));
-                        let _: () = msg_send![menu_state.mem_item, setTitle: mem_str];
+                            let cpu_str = NSString::alloc(nil).init_str(&format!(
+                                "CPU  {:.1}%",
+                                snap.cpu_usage_percent
+                            ));
+                            let _: () = msg_send![menu_state.cpu_item, setTitle: cpu_str];
 
-                        let net_str = NSString::alloc(nil).init_str(&format!(
-                            "NET  ↓{:.1}  ↑{:.1} KB/s",
-                            rx_kbps, tx_kbps
-                        ));
-                        let _: () = msg_send![menu_state.net_item, setTitle: net_str];
+                            let mem_str = NSString::alloc(nil).init_str(&format!(
+                                "MEM  {:.1}%  ({}/{} MB)",
+                                snap.memory_usage_percent,
+                                snap.memory_used_mb,
+                                snap.memory_total_mb
+                            ));
+                            let _: () = msg_send![menu_state.mem_item, setTitle: mem_str];
+
+                            let net_str = NSString::alloc(nil).init_str(&format!(
+                                "NET  ↓{:.1}  ↑{:.1} KB/s",
+                                rx_kbps, tx_kbps
+                            ));
+                            let _: () = msg_send![menu_state.net_item, setTitle: net_str];
+                        }
                     }
                 }
             }
@@ -231,15 +400,16 @@ struct MenuState {
     cpu_item: cocoa::base::id,
     mem_item: cocoa::base::id,
     net_item: cocoa::base::id,
+    /// CPU/MEM/NET 上方的分隔线（随这三行一起隐藏/显示）
+    stats_separator: cocoa::base::id,
 }
 
 // ─── 构建状态栏 ───────────────────────────────────────────────────────────────
 
 #[cfg(target_os = "macos")]
-unsafe fn build_statusbar(port: u16) -> (Arc<MenuState>, cocoa::base::id) {
+unsafe fn build_statusbar(port: u16, ws_running: bool) -> (Arc<MenuState>, cocoa::base::id) {
     use cocoa::appkit::{NSMenu, NSMenuItem};
     use cocoa::base::{id, nil, NO};
-    use cocoa::foundation::NSString;
     use objc::declare::ClassDecl;
     use objc::runtime::{Object, Sel};
     use objc::{class, msg_send, sel, sel_impl};
@@ -268,6 +438,7 @@ unsafe fn build_statusbar(port: u16) -> (Arc<MenuState>, cocoa::base::id) {
         cpu_item: nil,
         mem_item: nil,
         net_item: nil,
+        stats_separator: nil,
     });
 
     let handler: id = msg_send![class!(SysMonMenuHandler), new];
@@ -281,7 +452,10 @@ unsafe fn build_statusbar(port: u16) -> (Arc<MenuState>, cocoa::base::id) {
     let title_item = make_menu_item("SysMon WS", nil, None, false);
     NSMenu::addItem_(menu, title_item);
 
-    NSMenu::addItem_(menu, NSMenuItem::separatorItem(nil));
+    // 统计数据分隔线 + 三行数据（WS 停止时隐藏）
+    let stats_sep = NSMenuItem::separatorItem(nil);
+    let _: () = msg_send![stats_sep, retain];
+    NSMenu::addItem_(menu, stats_sep);
 
     let cpu_item = make_menu_item("CPU  --", nil, None, false);
     NSMenu::addItem_(menu, cpu_item);
@@ -290,13 +464,25 @@ unsafe fn build_statusbar(port: u16) -> (Arc<MenuState>, cocoa::base::id) {
     let net_item = make_menu_item("NET  ↓-- ↑--", nil, None, false);
     NSMenu::addItem_(menu, net_item);
 
+    // 若 WS 初始关闭，则立即隐藏统计行
+    if !ws_running {
+        let hidden: cocoa::base::BOOL = cocoa::base::YES;
+        let _: () = msg_send![stats_sep, setHidden: hidden];
+        let _: () = msg_send![cpu_item,  setHidden: hidden];
+        let _: () = msg_send![mem_item,  setHidden: hidden];
+        let _: () = msg_send![net_item,  setHidden: hidden];
+    }
+
     NSMenu::addItem_(menu, NSMenuItem::separatorItem(nil));
 
-    let addr_str = format!("ws://localhost:{}", port);
+    // 地址栏：显示实际内网 IP
+    let local_ip = get_local_ipv4();
+    let addr_str = format!("ws://{}:{}", local_ip, port);
     let addr_item = make_menu_item(&addr_str, nil, None, false);
     NSMenu::addItem_(menu, addr_item);
 
-    let toggle_item = make_menu_item("⏹ 停止服务", handler, Some(sel!(handleToggle:)), true);
+    let toggle_label = if ws_running { "⏹ 停止服务" } else { "▶ 启动服务" };
+    let toggle_item = make_menu_item(toggle_label, handler, Some(sel!(handleToggle:)), true);
     NSMenu::addItem_(menu, toggle_item);
 
     NSMenu::addItem_(menu, NSMenuItem::separatorItem(nil));
@@ -309,6 +495,7 @@ unsafe fn build_statusbar(port: u16) -> (Arc<MenuState>, cocoa::base::id) {
     (*ms_ptr).cpu_item = cpu_item;
     (*ms_ptr).mem_item = mem_item;
     (*ms_ptr).net_item = net_item;
+    (*ms_ptr).stats_separator = stats_sep;
 
     let status_item = sb::create_status_item(menu);
 
@@ -350,6 +537,23 @@ unsafe fn update_toggle_text(item: cocoa::base::id, ws_running: bool) {
     let text = if ws_running { "⏹ 停止服务" } else { "▶ 启动服务" };
     let ns_str = NSString::alloc(nil).init_str(text);
     let _: () = msg_send![item, setTitle: ns_str];
+}
+
+/// 控制 CPU/MEM/NET 统计行及其上方分隔线的显示与隐藏
+#[cfg(target_os = "macos")]
+unsafe fn set_stats_items_hidden(
+    sep: cocoa::base::id,
+    cpu: cocoa::base::id,
+    mem: cocoa::base::id,
+    net: cocoa::base::id,
+    hidden: bool,
+) {
+    use objc::{msg_send, sel, sel_impl};
+    let flag: cocoa::base::BOOL = if hidden { cocoa::base::YES } else { cocoa::base::NO };
+    let _: () = msg_send![sep, setHidden: flag];
+    let _: () = msg_send![cpu, setHidden: flag];
+    let _: () = msg_send![mem, setHidden: flag];
+    let _: () = msg_send![net, setHidden: flag];
 }
 
 // ── ObjC 菜单回调 ─────────────────────────────────────────────────────────────

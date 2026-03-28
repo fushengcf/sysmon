@@ -1,7 +1,14 @@
 package com.sysmon.monitor.ui.screens
 
 import androidx.compose.animation.*
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.foundation.*
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -511,6 +518,9 @@ private fun ChartPage(
     var dragAccum by remember { mutableStateOf(0f) }
     val swipeThreshold = 80f
 
+    val gpuValue = metrics?.gpuUsagePercent
+    val coreList = metrics?.cpuPerCore.orEmpty()
+
     Row(
         modifier = Modifier
             .fillMaxSize()
@@ -539,12 +549,11 @@ private fun ChartPage(
             rxHistory       = netRxHistory,
             txHistory       = netTxHistory,
             connectedRemark = connectedRemark,
-            savedUrlsCount  = savedUrls.size,
             onDisconnect    = onDisconnect,
             modifier        = Modifier.weight(5f).fillMaxHeight()
         )
 
-        // 列2：CPU（上）+ MEM（下）
+        // 列2：CPU（上）+ MEM（下）—— 始终不变
         Column(
             modifier = Modifier.weight(3f).fillMaxHeight(),
             verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -562,10 +571,15 @@ private fun ChartPage(
             )
         }
 
-        // 列3：多核（有多核时显示）
-        if ((metrics?.cpuPerCore?.size ?: 0) > 1) {
+        // 列3：有 gpu_usage_percent 时展示 GpuCard，否则展示多核（有数据时）
+        if (gpuValue != null) {
+            GpuCard(
+                value    = gpuValue,
+                modifier = Modifier.weight(2.5f).fillMaxHeight()
+            )
+        } else if (coreList.isNotEmpty()) {
             CoresCard(
-                cores    = metrics?.cpuPerCore ?: emptyList(),
+                cores    = coreList,
                 modifier = Modifier.weight(2.5f).fillMaxHeight()
             )
         }
@@ -579,7 +593,6 @@ private fun NetworkCard(
     rxKbps: Double, txKbps: Double,
     rxHistory: List<Double>, txHistory: List<Double>,
     connectedRemark: String,
-    savedUrlsCount: Int,
     onDisconnect: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -591,7 +604,7 @@ private fun NetworkCard(
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             // NETWORK 标签
-            CardLabel(label = "NETWORK", color = NetAmber)
+            CardLabel(label = "NET", color = NetAmber)
 
             // 备注-LIVE 胶囊（有备注时显示备注，否则只显示 LIVE）
             Row(
@@ -632,19 +645,6 @@ private fun NetworkCard(
             }
 
             Spacer(Modifier.weight(1f))
-
-            // 多链接时显示滑动提示
-            if (savedUrlsCount > 1) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(2.dp)
-                ) {
-                    Text("◀", color = TextMuted.copy(alpha = 0.5f), fontSize = 8.sp)
-                    Text("滑动切换", color = TextMuted.copy(alpha = 0.5f), fontSize = 8.sp,
-                        fontFamily = FontFamily.Monospace)
-                    Text("▶", color = TextMuted.copy(alpha = 0.5f), fontSize = 8.sp)
-                }
-            }
 
             // 图例
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -718,6 +718,97 @@ private fun CpuCard(
     }
 }
 
+// ─── GPU 卡片（竖向分段热力柱，有 gpu_usage_percent 字段时替换 CpuCard）────────
+//
+// 图表选型：竖向分段柱状图（SegmentedBar）
+//   · 将 0~100% 分为 20 个小格（每格 5%），已达到的格子点亮，颜色随占用率渐变
+//   · 与 CPU GaugeChart 视觉互补，同时占用相同的卡片尺寸区域
+//   · 无历史记录（GPU 数据是实时快照），只显示当前值 + 大字百分比 + 标签
+
+@Composable
+private fun GpuCard(
+    value: Float,
+    modifier: Modifier = Modifier,
+) {
+    GlassCard(modifier = modifier, accentColor = GpuIndigo, glowAlignment = GlowAlignment.TopLeft) {
+        Row(modifier = Modifier.fillMaxSize()) {
+            VerticalLabel(label = "GPU", color = GpuIndigo)
+            Column(
+                modifier = Modifier.weight(1f).fillMaxHeight().padding(vertical = 6.dp, horizontal = 4.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                // 大字百分比
+                Text(
+                    text = "${value.roundToInt()}",
+                    color = GpuIndigo,
+                    fontSize = 30.sp,
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = FontFamily.Monospace,
+                    lineHeight = 30.sp
+                )
+                Text(text = "%", color = TextSecondary, fontSize = 12.sp)
+
+                Spacer(Modifier.height(6.dp))
+
+                // 竖向分段热力柱（20 格，每格 5%）
+                GpuSegmentBar(
+                    value = value,
+                    modifier = Modifier.fillMaxWidth().weight(1f)
+                )
+            }
+        }
+    }
+}
+
+// 竖向分段热力柱：从下往上点亮，颜色从 GpuIndigo → GpuFuchsia 渐变
+@Composable
+private fun GpuSegmentBar(value: Float, modifier: Modifier = Modifier) {
+    val animatedValue = remember { Animatable(0f) }
+    LaunchedEffect(value) {
+        animatedValue.animateTo(
+            targetValue = value.coerceIn(0f, 100f),
+            animationSpec = tween(durationMillis = 500, easing = FastOutSlowInEasing)
+        )
+    }
+
+    Canvas(modifier = modifier) {
+        val totalSegments = 20
+        val gapPx = 3f
+        val totalGap = gapPx * (totalSegments - 1)
+        val segH = ((size.height - totalGap) / totalSegments).coerceAtLeast(2f)
+        val cornerR = segH / 2f
+        val litCount = ((animatedValue.value / 100f) * totalSegments).toInt().coerceIn(0, totalSegments)
+
+        for (i in 0 until totalSegments) {
+            // 第 0 格在最底部，第 19 格在最顶部
+            val segIdx = totalSegments - 1 - i   // 从顶到底绘制
+            val top = i * (segH + gapPx)
+            val lit = segIdx < litCount           // 从底部往上点亮
+
+            val progress = if (totalSegments <= 1) 1f else segIdx.toFloat() / (totalSegments - 1)
+            val litColor = lerp(GpuIndigo, GpuFuchsia, progress)
+
+            drawRoundRect(
+                color = if (lit) litColor else BgSlate.copy(alpha = 0.6f),
+                topLeft = Offset(0f, top),
+                size = Size(size.width, segH),
+                cornerRadius = CornerRadius(cornerR)
+            )
+
+            // 亮起时加轻微发光
+            if (lit) {
+                drawRoundRect(
+                    color = litColor.copy(alpha = 0.25f),
+                    topLeft = Offset(-2f, top - 2f),
+                    size = Size(size.width + 4f, segH + 4f),
+                    cornerRadius = CornerRadius(cornerR + 2f)
+                )
+            }
+        }
+    }
+}
+
 // ─── 内存仪表卡片 ─────────────────────────────────────────────────────────────
 
 @Composable
@@ -772,7 +863,11 @@ private fun MemCard(
 
 @Composable
 private fun CoresCard(cores: List<Float>, modifier: Modifier = Modifier) {
+    // 阈值：超过 14 核时切换为多列网格模式
+    val useGridMode = cores.size > 14
+
     GlassCard(modifier = modifier, accentColor = CoreCyan, glowAlignment = GlowAlignment.TopRight) {
+        // ── Header 行 ──────────────────────────────────────────────────────────
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -790,31 +885,61 @@ private fun CoresCard(cores: List<Float>, modifier: Modifier = Modifier) {
             }
         }
         Spacer(Modifier.height(8.dp))
-        Column(
-            modifier = Modifier.fillMaxWidth().weight(1f),
-            verticalArrangement = Arrangement.SpaceEvenly
-        ) {
-            cores.forEachIndexed { i, v ->
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Text(text = "C$i", color = TextSecondary, fontSize = 9.sp,
-                        fontFamily = FontFamily.Monospace, modifier = Modifier.width(18.dp))
-                    Box(modifier = Modifier.weight(1f).height(18.dp)) {
-                        CoreBarChart(coreValues = listOf(v), modifier = Modifier.fillMaxSize())
+
+        if (useGridMode) {
+            // ── 超过 14 核：多列网格，去掉 Cx 标签，每行 2 列 ──────────────────
+            // 将 cores 按每组 2 个分行，每个核只展示进度条（无文字标签）
+            Column(
+                modifier = Modifier.fillMaxWidth().weight(1f),
+                verticalArrangement = Arrangement.SpaceEvenly
+            ) {
+                val chunked = cores.chunked(2)
+                chunked.forEach { rowCores ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        rowCores.forEachIndexed { _, v ->
+                            Box(modifier = Modifier.weight(1f).height(14.dp)) {
+                                CoreBarChart(coreValues = listOf(v), modifier = Modifier.fillMaxSize())
+                            }
+                        }
+                        // 若最后一行只有 1 个核，用空白补齐
+                        if (rowCores.size == 1) {
+                            Spacer(modifier = Modifier.weight(1f))
+                        }
                     }
-                    Text(
-                        text = "${v.roundToInt()}%",
-                        color = when {
-                            v > 50f -> CoreAmber
-                            v > 20f -> CoreBlue
-                            else    -> TextSecondary
-                        },
-                        fontSize = 9.sp, fontFamily = FontFamily.Monospace,
-                        modifier = Modifier.width(26.dp)
-                    )
+                }
+            }
+        } else {
+            // ── ≤ 14 核：保持现有样式（Cx 标签 + 进度条 + 百分比）───────────────
+            Column(
+                modifier = Modifier.fillMaxWidth().weight(1f),
+                verticalArrangement = Arrangement.SpaceEvenly
+            ) {
+                cores.forEachIndexed { i, v ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(text = "C$i", color = TextSecondary, fontSize = 9.sp,
+                            fontFamily = FontFamily.Monospace, modifier = Modifier.width(18.dp))
+                        Box(modifier = Modifier.weight(1f).height(18.dp)) {
+                            CoreBarChart(coreValues = listOf(v), modifier = Modifier.fillMaxSize())
+                        }
+                        Text(
+                            text = "${v.roundToInt()}%",
+                            color = when {
+                                v > 50f -> CoreAmber
+                                v > 20f -> CoreBlue
+                                else    -> TextSecondary
+                            },
+                            fontSize = 9.sp, fontFamily = FontFamily.Monospace,
+                            modifier = Modifier.width(26.dp)
+                        )
+                    }
                 }
             }
         }

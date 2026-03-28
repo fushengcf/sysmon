@@ -29,4 +29,8 @@ data class SystemMetrics(
 
     @SerializedName("net_tx_kbps")
     val netTxKbps: Double = 0.0,
+
+    // GPU 占用率（0~100），服务端不支持时字段不存在，此处默认 null 不报错
+    @SerializedName("gpu_usage_percent")
+    val gpuUsagePercent: Float? = null,
 )

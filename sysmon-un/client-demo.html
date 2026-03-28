@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <title>sysmon-ws — 系统监控实时面板</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'SF Mono', 'Consolas', monospace;
+      background: #0d1117;
+      color: #c9d1d9;
+      padding: 24px;
+    }
+    h1 { color: #58a6ff; margin-bottom: 16px; font-size: 1.4rem; }
+    .status { margin-bottom: 16px; font-size: 0.85rem; }
+    .status span { padding: 2px 8px; border-radius: 4px; }
+    .connected    { background: #1a4731; color: #3fb950; }
+    .disconnected { background: #3d1f1f; color: #f85149; }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+    .card {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 16px;
+    }
+    .card-label { font-size: 0.75rem; color: #8b949e; margin-bottom: 6px; }
+    .card-value { font-size: 1.8rem; font-weight: bold; color: #e6edf3; }
+    .card-unit  { font-size: 0.85rem; color: #8b949e; margin-left: 4px; }
+
+    .bar-wrap { margin-top: 8px; background: #21262d; border-radius: 4px; height: 6px; overflow: hidden; }
+    .bar { height: 100%; border-radius: 4px; transition: width 0.4s ease; }
+    .bar-cpu  { background: #58a6ff; }
+    .bar-mem  { background: #3fb950; }
+
+    .cores {
+      display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px;
+    }
+    .core-chip {
+      font-size: 0.7rem;
+      padding: 2px 6px;
+      border-radius: 3px;
+      background: #21262d;
+      color: #8b949e;
+    }
+
+    pre#log {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 12px;
+      font-size: 0.78rem;
+      max-height: 260px;
+      overflow-y: auto;
+      color: #8b949e;
+    }
+    .ts { color: #3fb950; }
+  </style>
+</head>
+<body>
+  <h1>⚡ sysmon-ws 实时监控</h1>
+
+  <div class="status">
+    状态：<span id="status" class="disconnected">未连接</span>
+    &nbsp;&nbsp;
+    <input id="url" value="ws://localhost:9001" style="background:#21262d;border:1px solid #30363d;color:#c9d1d9;padding:4px 8px;border-radius:4px;width:220px;" />
+    <button onclick="connect()" style="margin-left:8px;padding:4px 12px;background:#1f6feb;color:#fff;border:none;border-radius:4px;cursor:pointer;">连接</button>
+    <button onclick="disconnect()" style="margin-left:4px;padding:4px 12px;background:#21262d;color:#c9d1d9;border:1px solid #30363d;border-radius:4px;cursor:pointer;">断开</button>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <div class="card-label">CPU 使用率</div>
+      <div><span class="card-value" id="cpu">--</span><span class="card-unit">%</span></div>
+      <div class="bar-wrap"><div class="bar bar-cpu" id="cpu-bar" style="width:0%"></div></div>
+      <div class="cores" id="cores"></div>
+    </div>
+    <div class="card">
+      <div class="card-label">内存使用率</div>
+      <div><span class="card-value" id="mem">--</span><span class="card-unit">%</span></div>
+      <div class="bar-wrap"><div class="bar bar-mem" id="mem-bar" style="width:0%"></div></div>
+      <div style="font-size:0.78rem;color:#8b949e;margin-top:6px;" id="mem-detail">-- / -- MB</div>
+    </div>
+    <div class="card">
+      <div class="card-label">网络下行</div>
+      <div><span class="card-value" id="rx">--</span><span class="card-unit">KB/s</span></div>
+    </div>
+    <div class="card">
+      <div class="card-label">网络上行</div>
+      <div><span class="card-value" id="tx">--</span><span class="card-unit">KB/s</span></div>
+    </div>
+  </div>
+
+  <pre id="log">等待数据...</pre>
+
+  <script>
+    let ws = null;
+
+    function connect() {
+      const url = document.getElementById('url').value.trim();
+      if (ws) ws.close();
+      ws = new WebSocket(url);
+
+      ws.onopen = () => {
+        document.getElementById('status').textContent = '已连接 ' + url;
+        document.getElementById('status').className = 'connected';
+      };
+
+      ws.onclose = () => {
+        document.getElementById('status').textContent = '已断开';
+        document.getElementById('status').className = 'disconnected';
+      };
+
+      ws.onerror = (e) => {
+        document.getElementById('status').textContent = '连接错误';
+        document.getElementById('status').className = 'disconnected';
+      };
+
+      ws.onmessage = (e) => {
+        try {
+          const d = JSON.parse(e.data);
+          update(d);
+        } catch (_) {}
+      };
+    }
+
+    function disconnect() {
+      if (ws) ws.close();
+    }
+
+    function update(d) {
+      const cpu = d.cpu_usage_percent.toFixed(1);
+      const mem = d.memory_usage_percent.toFixed(1);
+      const rx  = d.net_rx_kbps.toFixed(1);
+      const tx  = d.net_tx_kbps.toFixed(1);
+
+      document.getElementById('cpu').textContent = cpu;
+      document.getElementById('cpu-bar').style.width = cpu + '%';
+      document.getElementById('mem').textContent = mem;
+      document.getElementById('mem-bar').style.width = mem + '%';
+      document.getElementById('mem-detail').textContent =
+        d.memory_used_mb + ' / ' + d.memory_total_mb + ' MB';
+      document.getElementById('rx').textContent = rx;
+      document.getElementById('tx').textContent = tx;
+
+      // 每核 CPU
+      const coresEl = document.getElementById('cores');
+      coresEl.innerHTML = (d.cpu_per_core || [])
+        .map((v, i) => `<span class="core-chip">C${i} ${v.toFixed(0)}%</span>`)
+        .join('');
+
+      // 日志
+      const log = document.getElementById('log');
+      const line = `<span class="ts">${d.timestamp}</span>  CPU ${cpu}%  MEM ${mem}%  ↓${rx} ↑${tx} KB/s\n`;
+      log.innerHTML = line + log.innerHTML;
+      // 保留最近 50 行
+      const lines = log.innerHTML.split('\n');
+      if (lines.length > 50) log.innerHTML = lines.slice(0, 50).join('\n');
+    }
+  </script>
+</body>
+</html>

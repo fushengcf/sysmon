@@ -11,6 +11,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.PowerManager
 import android.provider.Settings
+import android.util.Log
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -35,11 +36,12 @@ class MainActivity : ComponentActivity() {
 
     /**
      * 屏幕控制广播接收器：
-     *  - ACTION_SCREEN_OFF → 取消 FLAG_KEEP_SCREEN_ON，退到后台让屏幕正常超时熄灭
+     *  - ACTION_SCREEN_OFF → 退到后台让屏幕熄灭
      *  - ACTION_SCREEN_ON  → 强制点亮屏幕并将 Activity 带回前台
      */
     private val screenControlReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
+            Log.d("SysMonMain", "收到广播: ${intent?.action}")
             when (intent?.action) {
                 SysMonForegroundService.ACTION_SCREEN_OFF -> applyScreenOff()
                 SysMonForegroundService.ACTION_SCREEN_ON  -> applyScreenOn()
@@ -70,7 +72,7 @@ class MainActivity : ComponentActivity() {
         // 注册屏幕控制广播（仅接收本应用内广播）
         registerScreenReceiver()
 
-        // 监听连接状态
+        // 监听连接状态：仅控制屏幕常亮和旋转方向，不再干预 Service 生命周期
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 vm.wsState.collect { state ->
@@ -80,17 +82,9 @@ class MainActivity : ComponentActivity() {
                             requestedOrientation =
                                 ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
                             window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-                            // 启动前台服务
-                            val fgIntent = SysMonForegroundService.startIntent(this@MainActivity)
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                                startForegroundService(fgIntent)
-                            } else {
-                                startService(fgIntent)
-                            }
                         }
                         else -> {
                             // 断开/重连中：恢复自由旋转
-                            // FLAG_KEEP_SCREEN_ON 的清除交由 applyScreenOff() 在全部失败后执行
                             requestedOrientation =
                                 ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR
                         }
@@ -115,39 +109,78 @@ class MainActivity : ComponentActivity() {
         vm.retryAutoConnect()
     }
 
+    override fun onPause() {
+        super.onPause()
+        Log.d("SysMonMain", "onPause()")
+    }
+
+    override fun onStop() {
+        super.onStop()
+        Log.d("SysMonMain", "onStop()")
+    }
+
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         if (hasFocus) hideSystemBars()
     }
 
     override fun onDestroy() {
-        try { unregisterReceiver(screenControlReceiver) } catch (_: Exception) {}
+        if (receiverRegistered) {
+            try { unregisterReceiver(screenControlReceiver) } catch (_: Exception) {}
+            receiverRegistered = false
+        }
         super.onDestroy()
     }
 
     // ── 屏幕控制 ──────────────────────────────────────────────────────────────
 
     /**
-     * 所有 WS 链接均失败 → 取消常亮标志，退到后台让屏幕正常超时熄灭。
-     * 进程和 Service 的 PARTIAL_WAKE_LOCK 依然持有，CPU 不会休眠。
+     * 断线 → 清除常亮标志，退到后台，屏幕立刻熄灭。
+     * 先关闭 showWhenLocked / turnScreenOn（否则系统会阻止 moveTaskToBack），
+     * 再退到后台，屏幕失去前台 Activity 的 FLAG_KEEP_SCREEN_ON 后立即熄灭。
      */
     private fun applyScreenOff() {
+        Log.d("SysMonMain", "applyScreenOff() called", Exception("caller trace"))
+        // 1. 清除常亮标志
         window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+
+        // 2. 关掉锁屏覆盖属性，否则系统拒绝将该 Activity 移到后台
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            setShowWhenLocked(false)
+            setTurnScreenOn(false)
+        } else {
+            @Suppress("DEPRECATION")
+            window.clearFlags(
+                WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
+            )
+        }
+
+        // 3. 退到后台 → 屏幕立刻熄灭
         moveTaskToBack(true)
     }
 
     /**
-     * 任意 WS 链接重连成功 → 点亮屏幕并将界面带回前台。
-     * 使用 PowerManager.FULL_WAKE_LOCK + ACQUIRE_CAUSES_WAKEUP 强制唤醒屏幕。
-     * FULL_WAKE_LOCK 虽已废弃，但在 Android 15 上对于前台应用依然有效；
-     * API 27+ 同时借助 setTurnScreenOn(true) + requestDismissKeyguard() 解锁。
+     * 重连成功 → 恢复锁屏覆盖属性，点亮屏幕并将界面带回前台。
      */
     @Suppress("DEPRECATION")
     private fun applyScreenOn() {
-        // 1. 恢复常亮标志
+        Log.d("SysMonMain", "applyScreenOn() called")
+        // 1. 恢复锁屏覆盖属性
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            setShowWhenLocked(true)
+            setTurnScreenOn(true)
+        } else {
+            window.addFlags(
+                WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
+            )
+        }
+
+        // 2. 恢复常亮标志
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
-        // 2. 用 FULL_WAKE_LOCK + ACQUIRE_CAUSES_WAKEUP 唤醒屏幕（短暂持有 2s）
+        // 3. 用 FULL_WAKE_LOCK + ACQUIRE_CAUSES_WAKEUP 唤醒屏幕（短暂持有 2s）
         val pm = getSystemService(PowerManager::class.java)
         val wl = pm.newWakeLock(
             PowerManager.FULL_WAKE_LOCK or
@@ -155,25 +188,27 @@ class MainActivity : ComponentActivity() {
             PowerManager.ON_AFTER_RELEASE,
             "SysMon::ScreenWakeUp"
         )
-        wl.acquire(2_000L)  // 2s 后自动释放，FLAG_KEEP_SCREEN_ON 接管
+        wl.acquire(2_000L)
 
-        // 3. API 27+ 请求解除锁屏
+        // 4. API 27+ 请求解除锁屏
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
             val km = getSystemService(KeyguardManager::class.java)
             km?.requestDismissKeyguard(this, null)
         }
 
-        // 4. 将 Activity 带回前台
+        // 5. 将 Activity 带回前台（只用 REORDER_TO_FRONT，不创建新实例）
         val intent = Intent(this, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or
-                    Intent.FLAG_ACTIVITY_NEW_TASK
+            flags = Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
         }
         startActivity(intent)
     }
 
     // ── 广播注册 ──────────────────────────────────────────────────────────────
 
+    private var receiverRegistered = false
+
     private fun registerScreenReceiver() {
+        if (receiverRegistered) return
         val filter = IntentFilter().apply {
             addAction(SysMonForegroundService.ACTION_SCREEN_OFF)
             addAction(SysMonForegroundService.ACTION_SCREEN_ON)
@@ -183,6 +218,7 @@ class MainActivity : ComponentActivity() {
         } else {
             registerReceiver(screenControlReceiver, filter)
         }
+        receiverRegistered = true
     }
 
     // ── 系统栏隐藏 ────────────────────────────────────────────────────────────
