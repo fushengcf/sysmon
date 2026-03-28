@@ -29,8 +29,16 @@ jobs:
       - name: Build
         shell: cmd
         run: |
-          cd TrafficMonitor/TrafficMonitor
-          msbuild TrafficMonitor.vcxproj /p:Configuration=Release /p:Platform=x64 /p:OutDir=x64\Release\ /p:WindowsTargetPlatformVersion=10.0
+          cd TrafficMonitor\TrafficMonitor
+          msbuild TrafficMonitor.vcxproj /p:Configuration=Release /p:Platform=x64 /p:OutDir=x64\Release\ /p:WindowsTargetPlatformVersion=10.0 /fl /flp:LogFile=build.log;Verbosity=normal 2>&1
+
+      - name: Upload build log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: TrafficMonitor-build-log
+          path: TrafficMonitor/TrafficMonitor/build.log
+          retention-days: 7
 
       - name: List output
         shell: cmd
