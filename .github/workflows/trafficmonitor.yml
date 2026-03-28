@@ -29,21 +29,29 @@ jobs:
       - name: Build
         shell: cmd
         run: |
-          cd TrafficMonitor
-          msbuild TrafficMonitor.sln /p:Configuration=Release /p:Platform=x64 /p:WindowsTargetPlatformVersion=10.0 /v:diag
+          cd TrafficMonitor\TrafficMonitor
+          msbuild TrafficMonitor.vcxproj /p:Configuration=Release /p:Platform=x64 /p:WindowsTargetPlatformVersion=10.0 /p:OutDir=%cd%\..\Bin\x64\Release\ > ..\build.log 2>&1
+          echo Exit code: %ERRORLEVEL%
+          type ..\build.log
+        continue-on-error: true
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: TrafficMonitor/build.log
+          retention-days: 3
 
       - name: List output
         if: always()
         shell: cmd
         run: |
-          echo === List all files under TrafficMonitor ===
-          dir /s TrafficMonitor\ 2>nul
+          echo === Bin directory ===
+          dir /s TrafficMonitor\Bin\ 2>nul
           echo.
-          echo === Find .exe ===
+          echo === All .exe under TrafficMonitor ===
           dir /s /b TrafficMonitor\*.exe 2>nul
-          echo.
-          echo === Find .dll ===
-          dir /s /b TrafficMonitor\*.dll 2>nul
 
       - name: Upload executable
         if: success()
