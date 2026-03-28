@@ -1,0 +1,91 @@
+name: sysmon-ws CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'sysmon-ws/**'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'sysmon-ws/**'
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache cargo index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache cargo build
+        uses: actions/cache@v4
+        with:
+          path: target
+          key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build
+        run: cargo build --release -p sysmon-ws
+        working-directory: sysmon-ws
+
+      - name: Run tests
+        run: cargo test -p sysmon-ws
+        working-directory: sysmon-ws
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build macOS
+        run: cargo build --release -p sysmon-ws
+        working-directory: sysmon-ws
+
+      - name: Build macOS (apple)
+        run: |
+          mkdir -p release
+          cp target/release/sysmon-ws release/
+        working-directory: sysmon-ws
+
+      - name: Build Windows
+        run: cargo build --release -p sysmon-ws
+        shell: bash
+        working-directory: sysmon-ws
+
+      - name: Upload artifacts
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.ref }}
+          name: SysMon WS v${{ github.ref_name }}
+          files: |
+            release/sysmon-ws
+            target/release/sysmon-ws.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
