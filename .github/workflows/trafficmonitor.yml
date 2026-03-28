@@ -44,13 +44,13 @@ jobs:
       - name: List output
         shell: cmd
         run: |
-          dir TrafficMonitor\TrafficMonitor\x64\Release\*.exe 2>nul || echo "No exe found"
+          dir TrafficMonitor\Bin\x64\Release\*.exe 2>nul || echo "No exe found"
 
       - name: Upload executable
         uses: actions/upload-artifact@v4
         with:
           name: TrafficMonitor-x64
-          path: TrafficMonitor/TrafficMonitor/x64/Release/*.exe
+          path: TrafficMonitor/Bin/x64/Release/*.exe
           retention-days: 7
           if-no-files-found: error
 
@@ -84,6 +84,6 @@ jobs:
           tag_name: ${{ github.ref }}
           name: TrafficMonitor v${{ steps.version.outputs.VERSION }}
           files: |
-            TrafficMonitor/TrafficMonitor/x64/Release/*.exe
+            TrafficMonitor/Bin/x64/Release/*.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
