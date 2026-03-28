@@ -5,10 +5,12 @@ on:
     branches: [main]
     paths:
       - 'TrafficMonitor/**'
+      - '.github/workflows/trafficmonitor.yml'
   pull_request:
     branches: [main]
     paths:
       - 'TrafficMonitor/**'
+      - '.github/workflows/trafficmonitor.yml'
   workflow_dispatch:
 
 jobs:

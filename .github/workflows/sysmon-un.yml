@@ -5,10 +5,12 @@ on:
     branches: [main]
     paths:
       - 'sysmon-un/**'
+      - '.github/workflows/sysmon-un.yml'
   pull_request:
     branches: [main]
     paths:
       - 'sysmon-un/**'
+      - '.github/workflows/sysmon-un.yml'
   workflow_dispatch:
 
 jobs:
