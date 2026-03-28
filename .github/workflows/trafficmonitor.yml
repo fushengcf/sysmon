@@ -30,7 +30,7 @@ jobs:
         shell: cmd
         run: |
           cd TrafficMonitor/TrafficMonitor
-          msbuild TrafficMonitor.vcxproj /p:Configuration=Release /p:Platform=x64 /p:PlatformToolset=v143 /p:UseOfMFC=2 /p:OutDir=x64\Release\
+          msbuild TrafficMonitor.vcxproj /p:Configuration=Release /p:Platform=x64 /p:OutDir=x64\Release\ /p:WindowsTargetPlatformVersion=10.0
 
       - name: List output
         shell: cmd
@@ -63,7 +63,7 @@ jobs:
         shell: cmd
         run: |
           cd TrafficMonitor/TrafficMonitor
-          msbuild TrafficMonitor.vcxproj /p:Configuration=Release /p:Platform=x64 /p:PlatformToolset=v143 /p:UseOfMFC=2 /p:OutDir=x64\Release\
+          msbuild TrafficMonitor.vcxproj /p:Configuration=Release /p:Platform=x64 /p:OutDir=x64\Release\ /p:WindowsTargetPlatformVersion=10.0
 
       - name: Get version
         id: version
