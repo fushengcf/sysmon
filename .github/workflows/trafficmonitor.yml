@@ -21,6 +21,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Install MFC
+        shell: pwsh
+        run: |
+          $vsPath = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath
+          Write-Output "VS installed at: $vsPath"
+          & "$vsPath\Common7\IDE\Installer\vs_installershell.exe" modify `
+            --installPath "$vsPath" `
+            --add Microsoft.VisualStudio.Component.VC.ATLMFC `
+            --quiet --wait --norestart --nocache
+
       - name: Setup MSVC
         uses: microsoft/setup-msbuild@v2
         with:
@@ -32,21 +42,17 @@ jobs:
           cd TrafficMonitor
           msbuild TrafficMonitor.sln /p:Configuration=Release /p:Platform=x64 /p:WindowsTargetPlatformVersion=10.0
 
-      - name: List all output files
+      - name: List output
         if: always()
         shell: cmd
         run: |
-          echo === Checking TrafficMonitor\Bin\ ===
-          if exist TrafficMonitor\Bin\ (
-            dir /s /b TrafficMonitor\Bin\
-          ) else (
-            echo Bin directory does not exist
-          )
+          echo === Bin directory ===
+          dir /s /b TrafficMonitor\Bin\ 2>nul || echo Bin dir not found
           echo.
-          echo === Searching all .exe under TrafficMonitor\ ===
+          echo === All .exe ===
           dir /s /b TrafficMonitor\*.exe 2>nul || echo No .exe found
           echo.
-          echo === Searching all .dll under TrafficMonitor\ ===
+          echo === All .dll ===
           dir /s /b TrafficMonitor\*.dll 2>nul || echo No .dll found
 
       - name: Upload executable
@@ -66,6 +72,15 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Install MFC
+        shell: pwsh
+        run: |
+          $vsPath = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath
+          & "$vsPath\Common7\IDE\Installer\vs_installershell.exe" modify `
+            --installPath "$vsPath" `
+            --add Microsoft.VisualStudio.Component.VC.ATLMFC `
+            --quiet --wait --norestart --nocache
 
       - name: Setup MSVC
         uses: microsoft/setup-msbuild@v2
