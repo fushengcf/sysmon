@@ -48,10 +48,15 @@ jobs:
         shell: cmd
         run: |
           echo === Bin directory ===
-          dir /s TrafficMonitor\Bin\ 2>nul
+          dir TrafficMonitor\Bin\ 2>nul || echo No Bin dir
           echo.
           echo === All .exe under TrafficMonitor ===
-          dir /s /b TrafficMonitor\*.exe 2>nul
+          dir /s /b TrafficMonitor\*.exe || echo No .exe found
+          echo.
+          echo === Check OutDir contents ===
+          dir TrafficMonitor\Bin\x64\Release\ 2>nul || echo Path not found
+          dir TrafficMonitor\Bin\Release\ 2>nul || echo Path not found
+          dir TrafficMonitor\TrafficMonitor\Bin\x64\Release\ 2>nul || echo Path not found
 
       - name: Upload executable
         if: success()
