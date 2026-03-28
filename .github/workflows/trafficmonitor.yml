@@ -30,22 +30,24 @@ jobs:
         shell: cmd
         run: |
           cd TrafficMonitor
-          msbuild TrafficMonitor.sln /p:Configuration=Release /p:Platform=x64 /p:WindowsTargetPlatformVersion=10.0 /v:minimal > build_output.txt 2>&1
-          type build_output.txt
+          msbuild TrafficMonitor.sln /p:Configuration=Release /p:Platform=x64 /p:WindowsTargetPlatformVersion=10.0
 
-      - name: Upload build output on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: TrafficMonitor-build-output
-          path: TrafficMonitor/build_output.txt
-          retention-days: 7
-
-      - name: Find output exe
+      - name: List all output files
+        if: always()
         shell: cmd
         run: |
-          echo Searching for .exe files under TrafficMonitor\
-          dir /s /b TrafficMonitor\*.exe || echo "No exe files found"
+          echo === Checking TrafficMonitor\Bin\ ===
+          if exist TrafficMonitor\Bin\ (
+            dir /s /b TrafficMonitor\Bin\
+          ) else (
+            echo Bin directory does not exist
+          )
+          echo.
+          echo === Searching all .exe under TrafficMonitor\ ===
+          dir /s /b TrafficMonitor\*.exe 2>nul || echo No .exe found
+          echo.
+          echo === Searching all .dll under TrafficMonitor\ ===
+          dir /s /b TrafficMonitor\*.dll 2>nul || echo No .dll found
 
       - name: Upload executable
         uses: actions/upload-artifact@v4

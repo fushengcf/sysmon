@@ -45,10 +45,11 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Build
-        run: cargo build --release -p sysmon-un
+        run: cargo build --release -p sysmon-un 2>&1
         working-directory: sysmon-un
 
       - name: Run tests
+        if: success()
         run: cargo test -p sysmon-un
         working-directory: sysmon-un
 
