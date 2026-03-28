@@ -23,12 +23,19 @@ jobs:
 
       - name: Setup MSVC
         uses: microsoft/setup-msbuild@v2
+        with:
+          vsversion: latest
 
       - name: Build
         shell: cmd
         run: |
-          call "C:\Program Files\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat"
-          msbuild TrafficMonitor\TrafficMonitor\TrafficMonitor.vcxproj /p:Configuration=Release /p:Platform=x64 /p:PlatformToolset=v143 /p:UseOfMFC=2
+          cd TrafficMonitor/TrafficMonitor
+          msbuild TrafficMonitor.vcxproj /p:Configuration=Release /p:Platform=x64 /p:PlatformToolset=v143 /p:UseOfMFC=2 /p:OutDir=x64\Release\
+
+      - name: List output
+        shell: cmd
+        run: |
+          dir TrafficMonitor\TrafficMonitor\x64\Release\*.exe 2>nul || echo "No exe found"
 
       - name: Upload executable
         uses: actions/upload-artifact@v4
@@ -36,6 +43,7 @@ jobs:
           name: TrafficMonitor-x64
           path: TrafficMonitor/TrafficMonitor/x64/Release/*.exe
           retention-days: 7
+          if-no-files-found: error
 
   release:
     needs: build
@@ -48,12 +56,14 @@ jobs:
 
       - name: Setup MSVC
         uses: microsoft/setup-msbuild@v2
+        with:
+          vsversion: latest
 
       - name: Build Release
         shell: cmd
         run: |
-          call "C:\Program Files\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat"
-          msbuild TrafficMonitor\TrafficMonitor\TrafficMonitor.vcxproj /p:Configuration=Release /p:Platform=x64 /p:PlatformToolset=v143 /p:UseOfMFC=2
+          cd TrafficMonitor/TrafficMonitor
+          msbuild TrafficMonitor.vcxproj /p:Configuration=Release /p:Platform=x64 /p:PlatformToolset=v143 /p:UseOfMFC=2 /p:OutDir=x64\Release\
 
       - name: Get version
         id: version
