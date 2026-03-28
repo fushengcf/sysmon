@@ -22,14 +22,21 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install MFC
-        shell: pwsh
+        shell: powershell
         run: |
-          $vsPath = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath
-          Write-Output "VS installed at: $vsPath"
-          & "$vsPath\Common7\IDE\Installer\vs_installershell.exe" modify `
-            --installPath "$vsPath" `
-            --add Microsoft.VisualStudio.Component.VC.ATLMFC `
-            --quiet --wait --norestart --nocache
+          $installerPath = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer"
+          $installPath = & "$installerPath\vswhere.exe" -latest -property installationPath
+          $setupExe = "$installerPath\setup.exe"
+          Write-Output "Install path: $installPath"
+          Write-Output "Setup exe: $setupExe"
+          if (Test-Path $setupExe) {
+            Start-Process -FilePath $setupExe -ArgumentList "modify","--installPath",$installPath,"--add","Microsoft.VisualStudio.Component.VC.ATLMFC","--quiet","--wait","--norestart" -Wait -NoNewWindow
+          } else {
+            Write-Output "setup.exe not found, trying download"
+            $dlPath = "$env:TEMP\vs_installer.exe"
+            Invoke-WebRequest "https://aka.ms/vs/17/release/vs_Enterprise.exe" -OutFile $dlPath
+            Start-Process -FilePath $dlPath -ArgumentList "modify","--installPath",$installPath,"--add","Microsoft.VisualStudio.Component.VC.ATLMFC","--quiet","--wait","--norestart" -Wait -NoNewWindow
+          }
 
       - name: Setup MSVC
         uses: microsoft/setup-msbuild@v2
@@ -51,9 +58,6 @@ jobs:
           echo.
           echo === All .exe ===
           dir /s /b TrafficMonitor\*.exe 2>nul || echo No .exe found
-          echo.
-          echo === All .dll ===
-          dir /s /b TrafficMonitor\*.dll 2>nul || echo No .dll found
 
       - name: Upload executable
         uses: actions/upload-artifact@v4
@@ -74,13 +78,11 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install MFC
-        shell: pwsh
+        shell: powershell
         run: |
-          $vsPath = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath
-          & "$vsPath\Common7\IDE\Installer\vs_installershell.exe" modify `
-            --installPath "$vsPath" `
-            --add Microsoft.VisualStudio.Component.VC.ATLMFC `
-            --quiet --wait --norestart --nocache
+          $installerPath = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer"
+          $installPath = & "$installerPath\vswhere.exe" -latest -property installationPath
+          Start-Process -FilePath "$installerPath\setup.exe" -ArgumentList "modify","--installPath",$installPath,"--add","Microsoft.VisualStudio.Component.VC.ATLMFC","--quiet","--wait","--norestart" -Wait -NoNewWindow
 
       - name: Setup MSVC
         uses: microsoft/setup-msbuild@v2
