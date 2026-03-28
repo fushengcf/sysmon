@@ -13,11 +13,7 @@ on:
 
 jobs:
   build:
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-
-    runs-on: ${{ matrix.os }}
+    runs-on: macos-latest
 
     steps:
       - name: Checkout
@@ -54,7 +50,7 @@ jobs:
 
   release:
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     if: startsWith(github.ref, 'refs/tags/v')
 
     steps:
@@ -68,24 +64,12 @@ jobs:
         run: cargo build --release -p sysmon-ws
         working-directory: sysmon-ws
 
-      - name: Build macOS (apple)
-        run: |
-          mkdir -p release
-          cp target/release/sysmon-ws release/
-        working-directory: sysmon-ws
-
-      - name: Build Windows
-        run: cargo build --release -p sysmon-ws
-        shell: bash
-        working-directory: sysmon-ws
-
-      - name: Upload artifacts
+      - name: Upload to Release
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ github.ref }}
           name: SysMon WS v${{ github.ref_name }}
           files: |
-            release/sysmon-ws
-            target/release/sysmon-ws.exe
+            sysmon-ws/target/release/sysmon-ws
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
