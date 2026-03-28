@@ -1,0 +1,79 @@
+name: Android CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'sysmon-android/**'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'sysmon-android/**'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: gradle
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x sysmon-android/gradlew
+
+      - name: Build debug APK
+        run: |
+          cd sysmon-android
+          ./gradlew assembleDebug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-apk
+          path: sysmon-android/app/build/outputs/apk/debug/*.apk
+          retention-days: 7
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: gradle
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x sysmon-android/gradlew
+
+      - name: Build release APK
+        run: |
+          cd sysmon-android
+          ./gradlew assembleRelease
+
+      - name: Get version name
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.ref }}
+          name: SysMon Android v${{ steps.version.outputs.VERSION }}
+          files: sysmon-android/app/build/outputs/apk/release/*.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
