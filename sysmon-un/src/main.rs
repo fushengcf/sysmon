@@ -103,13 +103,13 @@ fn run_tray() {
 
     // ── 托盘线程 ──────────────────────────────────────────────────────────────
     let tray_ws_running = Arc::clone(&ws_running);
-    let tray_service = ksni::TrayService::new(tray::SysmonTray {
-        rx: metrics_rx,
-        action_tx,
-        ws_running: tray_ws_running,
+    let tray_handle = ksni::spawn(move || {
+        tray::SysmonTray {
+            rx: metrics_rx,
+            action_tx,
+            ws_running: tray_ws_running,
+        }
     });
-    let tray_handle = tray_service.handle();
-    tray_service.spawn();
 
     tracing::info!("Tray started. WebSocket: ws://0.0.0.0:{}", WS_PORT);
 

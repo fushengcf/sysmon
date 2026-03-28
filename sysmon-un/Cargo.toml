@@ -23,6 +23,7 @@ anyhow = "1"
 
 # Linux 桌面系统托盘 (StatusNotifierItem)
 ksni = "0.2"
+image = "0.25"
 
 [profile.release]
 opt-level = 3
