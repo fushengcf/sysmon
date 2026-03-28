@@ -30,13 +30,16 @@ jobs:
         shell: cmd
         run: |
           cd TrafficMonitor\TrafficMonitor
-          msbuild TrafficMonitor.vcxproj /p:Configuration=Release /p:Platform=x64 /p:OutDir=x64\Release\ /p:WindowsTargetPlatformVersion=10.0 /v:normal
+          msbuild TrafficMonitor.vcxproj /p:Configuration=Release /p:Platform=x64 /p:OutDir=x64\Release\ /p:WindowsTargetPlatformVersion=10.0 /v:normal > build_output.txt 2>&1
+          type build_output.txt
 
-      - name: Show build log on failure
+      - name: Upload build output on failure
         if: failure()
-        shell: cmd
-        run: |
-          type TrafficMonitor\TrafficMonitor\msbuild.log 2>nul || echo "No msbuild.log found"
+        uses: actions/upload-artifact@v4
+        with:
+          name: TrafficMonitor-build-output
+          path: TrafficMonitor/TrafficMonitor/build_output.txt
+          retention-days: 7
 
       - name: List output
         shell: cmd
