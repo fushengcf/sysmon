@@ -21,23 +21,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install MFC
-        shell: powershell
-        run: |
-          $installerPath = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer"
-          $installPath = & "$installerPath\vswhere.exe" -latest -property installationPath
-          $setupExe = "$installerPath\setup.exe"
-          Write-Output "Install path: $installPath"
-          Write-Output "Setup exe: $setupExe"
-          if (Test-Path $setupExe) {
-            Start-Process -FilePath $setupExe -ArgumentList "modify","--installPath",$installPath,"--add","Microsoft.VisualStudio.Component.VC.ATLMFC","--quiet","--wait","--norestart" -Wait -NoNewWindow
-          } else {
-            Write-Output "setup.exe not found, trying download"
-            $dlPath = "$env:TEMP\vs_installer.exe"
-            Invoke-WebRequest "https://aka.ms/vs/17/release/vs_Enterprise.exe" -OutFile $dlPath
-            Start-Process -FilePath $dlPath -ArgumentList "modify","--installPath",$installPath,"--add","Microsoft.VisualStudio.Component.VC.ATLMFC","--quiet","--wait","--norestart" -Wait -NoNewWindow
-          }
-
       - name: Setup MSVC
         uses: microsoft/setup-msbuild@v2
         with:
@@ -47,19 +30,23 @@ jobs:
         shell: cmd
         run: |
           cd TrafficMonitor
-          msbuild TrafficMonitor.sln /p:Configuration=Release /p:Platform=x64 /p:WindowsTargetPlatformVersion=10.0
+          msbuild TrafficMonitor.sln /p:Configuration=Release /p:Platform=x64 /p:WindowsTargetPlatformVersion=10.0 /v:diag
 
       - name: List output
         if: always()
         shell: cmd
         run: |
-          echo === Bin directory ===
-          dir /s /b TrafficMonitor\Bin\ 2>nul || echo Bin dir not found
+          echo === List all files under TrafficMonitor ===
+          dir /s TrafficMonitor\ 2>nul
           echo.
-          echo === All .exe ===
-          dir /s /b TrafficMonitor\*.exe 2>nul || echo No .exe found
+          echo === Find .exe ===
+          dir /s /b TrafficMonitor\*.exe 2>nul
+          echo.
+          echo === Find .dll ===
+          dir /s /b TrafficMonitor\*.dll 2>nul
 
       - name: Upload executable
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: TrafficMonitor-x64
@@ -76,13 +63,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Install MFC
-        shell: powershell
-        run: |
-          $installerPath = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer"
-          $installPath = & "$installerPath\vswhere.exe" -latest -property installationPath
-          Start-Process -FilePath "$installerPath\setup.exe" -ArgumentList "modify","--installPath",$installPath,"--add","Microsoft.VisualStudio.Component.VC.ATLMFC","--quiet","--wait","--norestart" -Wait -NoNewWindow
 
       - name: Setup MSVC
         uses: microsoft/setup-msbuild@v2
