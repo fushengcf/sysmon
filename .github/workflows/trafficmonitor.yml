@@ -30,7 +30,7 @@ jobs:
         shell: cmd
         run: |
           cd TrafficMonitor
-          msbuild TrafficMonitor.sln /p:Configuration=Release /p:Platform=x64 /p:OutDir=Bin\ /p:WindowsTargetPlatformVersion=10.0 /v:minimal > build_output.txt 2>&1
+          msbuild TrafficMonitor.sln /p:Configuration=Release /p:Platform=x64 /p:OutDir=%cd%\Bin\ /p:WindowsTargetPlatformVersion=10.0 /v:minimal > build_output.txt 2>&1
           type build_output.txt
 
       - name: Upload build output on failure
@@ -41,20 +41,22 @@ jobs:
           path: TrafficMonitor/build_output.txt
           retention-days: 7
 
-      - name: List output
+      - name: Find output exe
         shell: cmd
         run: |
-          echo Checking TrafficMonitor\Bin\x64\Release\
-          dir TrafficMonitor\Bin\x64\Release\*.exe 2>nul || echo "Not found"
+          echo Searching for .exe files in TrafficMonitor\Bin\
+          dir /s /b TrafficMonitor\Bin\*.exe
           echo.
-          echo Checking TrafficMonitor\Bin\Release\
-          dir TrafficMonitor\Bin\Release\*.exe 2>nul || echo "Not found"
+          for /r TrafficMonitor\Bin %%f in (*.exe) do (
+            echo Found: %%f
+          )
 
       - name: Upload executable
         uses: actions/upload-artifact@v4
         with:
           name: TrafficMonitor-x64
-          path: TrafficMonitor/Bin/x64/Release/*.exe
+          path: |
+            TrafficMonitor/Bin/**/*.exe
           retention-days: 7
           if-no-files-found: warn
 
@@ -75,8 +77,8 @@ jobs:
       - name: Build Release
         shell: cmd
         run: |
-          cd TrafficMonitor/TrafficMonitor
-          msbuild TrafficMonitor.vcxproj /p:Configuration=Release /p:Platform=x64 /p:OutDir=x64\Release\ /p:WindowsTargetPlatformVersion=10.0
+          cd TrafficMonitor
+          msbuild TrafficMonitor.sln /p:Configuration=Release /p:Platform=x64 /p:OutDir=%cd%\Bin\ /p:WindowsTargetPlatformVersion=10.0
 
       - name: Get version
         id: version
@@ -88,6 +90,6 @@ jobs:
           tag_name: ${{ github.ref }}
           name: TrafficMonitor v${{ steps.version.outputs.VERSION }}
           files: |
-            TrafficMonitor/Bin/x64/Release/*.exe
+            TrafficMonitor/Bin/**/*.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
