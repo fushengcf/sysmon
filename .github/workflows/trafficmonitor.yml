@@ -30,7 +30,7 @@ jobs:
         shell: cmd
         run: |
           cd TrafficMonitor
-          msbuild TrafficMonitor.sln /p:Configuration=Release /p:Platform=x64 /p:OutDir=%cd%\Bin\ /p:WindowsTargetPlatformVersion=10.0 /v:minimal > build_output.txt 2>&1
+          msbuild TrafficMonitor.sln /p:Configuration=Release /p:Platform=x64 /p:WindowsTargetPlatformVersion=10.0 /v:minimal > build_output.txt 2>&1
           type build_output.txt
 
       - name: Upload build output on failure
@@ -44,19 +44,15 @@ jobs:
       - name: Find output exe
         shell: cmd
         run: |
-          echo Searching for .exe files in TrafficMonitor\Bin\
-          dir /s /b TrafficMonitor\Bin\*.exe
-          echo.
-          for /r TrafficMonitor\Bin %%f in (*.exe) do (
-            echo Found: %%f
-          )
+          echo Searching for .exe files under TrafficMonitor\
+          dir /s /b TrafficMonitor\*.exe || echo "No exe files found"
 
       - name: Upload executable
         uses: actions/upload-artifact@v4
         with:
           name: TrafficMonitor-x64
           path: |
-            TrafficMonitor/Bin/**/*.exe
+            TrafficMonitor/Bin/x64/Release/*.exe
           retention-days: 7
           if-no-files-found: warn
 
@@ -78,7 +74,7 @@ jobs:
         shell: cmd
         run: |
           cd TrafficMonitor
-          msbuild TrafficMonitor.sln /p:Configuration=Release /p:Platform=x64 /p:OutDir=%cd%\Bin\ /p:WindowsTargetPlatformVersion=10.0
+          msbuild TrafficMonitor.sln /p:Configuration=Release /p:Platform=x64 /p:WindowsTargetPlatformVersion=10.0
 
       - name: Get version
         id: version
@@ -90,6 +86,6 @@ jobs:
           tag_name: ${{ github.ref }}
           name: TrafficMonitor v${{ steps.version.outputs.VERSION }}
           files: |
-            TrafficMonitor/Bin/**/*.exe
+            TrafficMonitor/Bin/x64/Release/*.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
