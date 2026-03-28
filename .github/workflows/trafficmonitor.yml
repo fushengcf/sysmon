@@ -44,7 +44,17 @@ jobs:
       - name: List output
         shell: cmd
         run: |
-          dir TrafficMonitor\Bin\x64\Release\*.exe 2>nul || echo "No exe found"
+          echo Checking TrafficMonitor\Bin\x64\Release\
+          dir TrafficMonitor\Bin\x64\Release\*.exe 2>nul
+          echo.
+          echo Checking TrafficMonitor\TrafficMonitor\Bin\x64\Release\
+          dir TrafficMonitor\TrafficMonitor\Bin\x64\Release\*.exe 2>nul
+          echo.
+          echo Checking TrafficMonitor\TrafficMonitor\x64\Release\
+          dir TrafficMonitor\TrafficMonitor\x64\Release\*.exe 2>nul
+          echo.
+          echo Checking all exe files in TrafficMonitor
+          dir /s /b TrafficMonitor\*.exe 2>nul || echo "No exe found"
 
       - name: Upload executable
         uses: actions/upload-artifact@v4
