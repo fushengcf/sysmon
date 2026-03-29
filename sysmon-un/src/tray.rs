@@ -5,7 +5,7 @@
 use std::sync::{mpsc, Arc};
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use ksni::{menu::StandardItem, Icon, Tray};
+use ksni::{menu::{StandardItem, Separator}, Icon, Tray};
 
 /// 托盘动作
 pub enum TrayAction {
@@ -72,7 +72,7 @@ impl Tray for SysmonTray {
                 } else {
                     "▶ 启动服务".into()
                 },
-                activate: Box::new(|this: &Self| {
+                activate: Box::new(|this: &mut Self| {
                     let _ = this.action_tx.send(TrayAction::Toggle);
                 }),
                 ..Default::default()
@@ -81,7 +81,7 @@ impl Tray for SysmonTray {
             ksni::menu::Separator.into(),
             StandardItem {
                 label: "退出".into(),
-                activate: Box::new(|this: &Self| {
+                activate: Box::new(|this: &mut Self| {
                     let _ = this.action_tx.send(TrayAction::Quit);
                 }),
                 ..Default::default()

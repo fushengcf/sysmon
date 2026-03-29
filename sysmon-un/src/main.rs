@@ -16,7 +16,7 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
-use metrics::{MetricsCollector, NetOnlyCollector, SystemMetrics};
+use metrics::{MetricsCollector, NetOnlyCollector};
 
 const WS_PORT: u16 = 9001;
 const INTERVAL_MS: u64 = 1000;
