@@ -52,6 +52,48 @@ jobs:
         run: cargo test -p sysmon-un
         working-directory: sysmon-un
 
+      - name: Build deb package
+        run: |
+          VERSION="0.1.0"
+          ARCH="amd64"
+          PKG_DIR="sysmon-un/target/deb/sysmon-un_${VERSION}_${ARCH}"
+          mkdir -p "$PKG_DIR/DEBIAN"
+          mkdir -p "$PKG_DIR/usr/bin"
+          mkdir -p "$PKG_DIR/usr/share/applications"
+
+          cp sysmon-un/target/release/sysmon-un "$PKG_DIR/usr/bin/"
+
+          cat > "$PKG_DIR/DEBIAN/control" << EOF
+          Package: sysmon-un
+          Version: ${VERSION}
+          Section: utils
+          Priority: optional
+          Architecture: ${ARCH}
+          Depends: libdbus-1-3, libssl3
+          Maintainer: fushengcf
+          Description: System monitor with WebSocket streaming for Ubuntu/Linux
+           CPU, Memory, Network monitoring with system tray and WebSocket server.
+          EOF
+
+          cat > "$PKG_DIR/usr/share/applications/sysmon-un.desktop" << EOF
+          [Desktop Entry]
+          Name=sysmon-un
+          Comment=System Monitor
+          Exec=/usr/bin/sysmon-un
+          Terminal=false
+          Type=Application
+          Categories=System;Monitor;
+          EOF
+
+          dpkg-deb --build "$PKG_DIR"
+
+      - name: Upload deb artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sysmon-un-deb
+          path: sysmon-un/target/deb/*.deb
+          retention-days: 7
+
   release:
     needs: build
     runs-on: ubuntu-latest
@@ -61,12 +103,52 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libdbus-1-dev libssl-dev pkg-config cmake build-essential
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Build Linux
+      - name: Build
         run: cargo build --release -p sysmon-un
         working-directory: sysmon-un
+
+      - name: Build deb package
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          ARCH="amd64"
+          PKG_DIR="sysmon-un/target/deb/sysmon-un_${VERSION}_${ARCH}"
+          mkdir -p "$PKG_DIR/DEBIAN"
+          mkdir -p "$PKG_DIR/usr/bin"
+          mkdir -p "$PKG_DIR/usr/share/applications"
+
+          cp sysmon-un/target/release/sysmon-un "$PKG_DIR/usr/bin/"
+
+          cat > "$PKG_DIR/DEBIAN/control" << EOF
+          Package: sysmon-un
+          Version: ${VERSION}
+          Section: utils
+          Priority: optional
+          Architecture: ${ARCH}
+          Depends: libdbus-1-3, libssl3
+          Maintainer: fushengcf
+          Description: System monitor with WebSocket streaming for Ubuntu/Linux
+           CPU, Memory, Network monitoring with system tray and WebSocket server.
+          EOF
+
+          cat > "$PKG_DIR/usr/share/applications/sysmon-un.desktop" << EOF
+          [Desktop Entry]
+          Name=sysmon-un
+          Comment=System Monitor
+          Exec=/usr/bin/sysmon-un
+          Terminal=false
+          Type=Application
+          Categories=System;Monitor;
+          EOF
+
+          dpkg-deb --build "$PKG_DIR"
 
       - name: Upload to Release
         uses: softprops/action-gh-release@v1
@@ -74,6 +156,6 @@ jobs:
           tag_name: ${{ github.ref }}
           name: SysMon UN v${{ github.ref_name }}
           files: |
-            sysmon-un/target/release/sysmon-un
+            sysmon-un/target/deb/*.deb
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
