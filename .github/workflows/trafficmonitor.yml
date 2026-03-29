@@ -29,11 +29,10 @@ jobs:
       - name: Build
         shell: cmd
         run: |
-          cd TrafficMonitor\TrafficMonitor
-          msbuild TrafficMonitor.vcxproj /p:Configuration=Release /p:Platform=x64 /p:WindowsTargetPlatformVersion=10.0 /p:OutDir=%cd%\..\Bin\x64\Release\ > ..\build.log 2>&1
-          echo Exit code: %ERRORLEVEL%
-          type ..\build.log
-        continue-on-error: true
+          cd TrafficMonitor
+          msbuild TrafficMonitor.sln /p:Configuration=Release /p:Platform=x64 /p:WindowsTargetPlatformVersion=10.0 > build.log 2>&1
+          echo MSBuild exit code: %ERRORLEVEL%
+          type build.log
 
       - name: Upload build log
         if: always()
@@ -47,16 +46,11 @@ jobs:
         if: always()
         shell: cmd
         run: |
-          echo === Bin directory ===
-          dir TrafficMonitor\Bin\ 2>nul || echo No Bin dir
-          echo.
           echo === All .exe under TrafficMonitor ===
-          dir /s /b TrafficMonitor\*.exe || echo No .exe found
+          for /r TrafficMonitor %%f in (*.exe) do echo %%f
           echo.
-          echo === Check OutDir contents ===
-          dir TrafficMonitor\Bin\x64\Release\ 2>nul || echo Path not found
-          dir TrafficMonitor\Bin\Release\ 2>nul || echo Path not found
-          dir TrafficMonitor\TrafficMonitor\Bin\x64\Release\ 2>nul || echo Path not found
+          echo === Bin directory structure ===
+          dir TrafficMonitor\Bin\ 2>nul || echo No Bin dir
 
       - name: Upload executable
         if: success()
