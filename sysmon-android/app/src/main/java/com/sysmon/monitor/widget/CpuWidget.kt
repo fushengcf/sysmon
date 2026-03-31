@@ -75,13 +75,10 @@ private fun CpuContent(cpu: Float, connected: Boolean) {
         Spacer(GlanceModifier.height(8.dp))
 
         if (connected) {
-            Row(verticalAlignment = Alignment.Bottom) {
-                Text(
-                    "${cpu.roundToInt()}",
-                    style = TextStyle(color = valueColor, fontSize = 36.sp, fontWeight = FontWeight.Bold)
-                )
-                Text("%", style = TextStyle(color = valueColor, fontSize = 16.sp))
-            }
+            Text(
+                "${cpu.roundToInt()}",
+                style = TextStyle(color = valueColor, fontSize = 36.sp, fontWeight = FontWeight.Bold)
+            )
 
             Spacer(GlanceModifier.height(4.dp))
 

@@ -26,6 +26,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -71,6 +72,8 @@ fun MonitorScreen(vm: MonitorViewModel = viewModel()) {
     }
 
     val currentPage = if (wsState is WsState.Connected) Page.CHART else Page.CONNECT
+
+    val rs = rememberResponsiveSize()
 
     Box(
         modifier = Modifier
@@ -118,6 +121,7 @@ fun MonitorScreen(vm: MonitorViewModel = viewModel()) {
                     onDisconnect = vm::disconnect,
                     onSwipePrev  = vm::switchToPrevUrl,
                     onSwipeNext  = vm::switchToNextUrl,
+                    rs           = rs,
                 )
             }
         }
@@ -176,16 +180,17 @@ private fun ConnectPage(
 
 @Composable
 private fun ConnectPageHeader(wsState: WsState, autoConnecting: Boolean) {
+    val rs = rememberResponsiveSize()
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Text(
             text = "SYSMON",
             color = Color.White,
-            fontSize = 28.sp,
+            fontSize = rs.titleFontSize(),
             fontWeight = FontWeight.Bold,
             fontFamily = FontFamily.Monospace,
-            letterSpacing = 6.sp
+            letterSpacing = (6 * rs.scaleFactor).sp
         )
-        Spacer(Modifier.height(6.dp))
+        Spacer(Modifier.height(rs.itemSpacing()))
         val (dotColor, statusText) = when {
             autoConnecting                -> WarnOrange to "AUTO CONNECTING"
             wsState is WsState.Connecting -> WarnOrange to "CONNECTING"
@@ -194,10 +199,10 @@ private fun ConnectPageHeader(wsState: WsState, autoConnecting: Boolean) {
         }
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
+            horizontalArrangement = Arrangement.spacedBy(rs.itemSpacing())
         ) {
-            Box(modifier = Modifier.size(6.dp).background(dotColor, CircleShape))
-            Text(text = statusText, color = dotColor, fontSize = 11.sp,
+            Box(modifier = Modifier.size(rs.dotSize()).background(dotColor, CircleShape))
+            Text(text = statusText, color = dotColor, fontSize = rs.smallFontSize(),
                 fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, letterSpacing = 1.5.sp)
         }
     }
@@ -213,6 +218,7 @@ private fun ConnectionCard(
     val isConnected  = wsState is WsState.Connected
     val isBusy       = wsState is WsState.Connecting || autoConnecting
     val shape        = RoundedCornerShape(20.dp)
+    val rs = rememberResponsiveSize()
 
     Column(
         modifier = Modifier
@@ -222,15 +228,15 @@ private fun ConnectionCard(
             .border(1.dp, Brush.verticalGradient(
                 colors = listOf(NeonBlue.copy(alpha = 0.3f), NeonBlue.copy(alpha = 0.08f))
             ), shape)
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+            .padding(rs.cardPadding()),
+        verticalArrangement = Arrangement.spacedBy(rs.itemSpacing(base = 10.dp))
     ) {
         CardLabel(label = "CONNECTION", color = NeonBlue)
 
         OutlinedTextField(
             value = wsUrl, onValueChange = onUrlChange,
             enabled = !isConnected && !isBusy,
-            placeholder = { Text("ws://192.168.x.x:9001", color = TextMuted, fontSize = 12.sp,
+            placeholder = { Text("ws://192.168.x.x:9001", color = TextMuted, fontSize = rs.labelFontSize(),
                 fontFamily = FontFamily.Monospace) },
             singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Done),
@@ -242,20 +248,20 @@ private fun ConnectionCard(
             ),
             shape = RoundedCornerShape(10.dp),
             modifier = Modifier.fillMaxWidth(),
-            textStyle = LocalTextStyle.current.copy(fontFamily = FontFamily.Monospace, fontSize = 12.sp),
+            textStyle = LocalTextStyle.current.copy(fontFamily = FontFamily.Monospace, fontSize = rs.labelFontSize(base = 12f)),
             leadingIcon = { Icon(Icons.Default.Wifi, null,
-                tint = if (isConnected) CpuGreen else TextMuted, modifier = Modifier.size(18.dp)) }
+                tint = if (isConnected) CpuGreen else TextMuted, modifier = Modifier.size(rs.iconSize(base = 18.dp))) }
         )
 
         if (wsState is WsState.Error) {
-            Text("⚠ ${wsState.message}", color = DangerRed, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+            Text("⚠ ${wsState.message}", color = DangerRed, fontSize = rs.smallFontSize(), fontFamily = FontFamily.Monospace)
         }
 
         // 连接中：连接按钮（禁用）+ 取消按钮；其他状态：单个按钮
         if (isBusy) {
             Row(
-                modifier = Modifier.fillMaxWidth().height(44.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                modifier = Modifier.fillMaxWidth().height(rs.buttonHeight()),
+                horizontalArrangement = Arrangement.spacedBy(rs.itemSpacing())
             ) {
                 // 连接中状态显示（禁用）
                 Button(
@@ -263,42 +269,42 @@ private fun ConnectionCard(
                     enabled = false,
                     modifier = Modifier.weight(1f).fillMaxHeight(),
                     shape = RoundedCornerShape(12.dp),
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                    contentPadding = PaddingValues(horizontal = rs.itemSpacing(base = 8.dp), vertical = 0.dp),
                     colors = ButtonDefaults.buttonColors(
                         disabledContainerColor = BorderColor,
                         disabledContentColor   = TextMuted
                     )
                 ) {
                     CircularProgressIndicator(
-                        modifier = Modifier.size(14.dp), color = WarnOrange, strokeWidth = 2.dp)
-                    Spacer(Modifier.width(6.dp))
+                        modifier = Modifier.size(rs.dotSize(base = 14.dp)), color = WarnOrange, strokeWidth = 2.dp)
+                    Spacer(Modifier.width(rs.itemSpacing(base = 6.dp)))
                     Text(
                         if (autoConnecting) "AUTO CONNECTING..." else "CONNECTING...",
-                        fontFamily = FontFamily.Monospace, fontSize = 11.sp,
+                        fontFamily = FontFamily.Monospace, fontSize = rs.smallFontSize(),
                         maxLines = 1
                     )
                 }
                 // 取消按钮
                 Button(
                     onClick = onCancelConnect,
-                    modifier = Modifier.width(88.dp).fillMaxHeight(),
+                    modifier = Modifier.width((88 * rs.scaleFactor).dp).fillMaxHeight(),
                     shape = RoundedCornerShape(12.dp),
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                    contentPadding = PaddingValues(horizontal = rs.itemSpacing(base = 8.dp), vertical = 0.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = DangerRed.copy(alpha = 0.15f),
                         contentColor   = DangerRed
                     ),
                     border = BorderStroke(1.dp, DangerRed.copy(alpha = 0.5f))
                 ) {
-                    Icon(Icons.Default.Close, null, modifier = Modifier.size(14.dp))
+                    Icon(Icons.Default.Close, null, modifier = Modifier.size(rs.dotSize(base = 14.dp)))
                     Spacer(Modifier.width(4.dp))
-                    Text("CANCEL", fontFamily = FontFamily.Monospace, fontSize = 11.sp)
+                    Text("CANCEL", fontFamily = FontFamily.Monospace, fontSize = rs.smallFontSize())
                 }
             }
         } else {
             Button(
                 onClick = { if (isConnected) onDisconnect() else onConnect() },
-                modifier = Modifier.fillMaxWidth().height(44.dp),
+                modifier = Modifier.fillMaxWidth().height(rs.buttonHeight()),
                 shape = RoundedCornerShape(12.dp),
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 0.dp),
                 colors = ButtonDefaults.buttonColors(
@@ -309,13 +315,13 @@ private fun ConnectionCard(
                     if (isConnected) DangerRed.copy(alpha = 0.5f) else NeonBlue.copy(alpha = 0.5f))
             ) {
                 if (isConnected) {
-                    Icon(Icons.Default.LinkOff, null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("DISCONNECT", fontFamily = FontFamily.Monospace, fontSize = 12.sp)
+                    Icon(Icons.Default.LinkOff, null, modifier = Modifier.size(rs.iconSize()))
+                    Spacer(Modifier.width(rs.itemSpacing(base = 6.dp)))
+                    Text("DISCONNECT", fontFamily = FontFamily.Monospace, fontSize = rs.bodyFontSize(base = 12f))
                 } else {
-                    Icon(Icons.Default.Link, null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("CONNECT", fontFamily = FontFamily.Monospace, fontSize = 12.sp)
+                    Icon(Icons.Default.Link, null, modifier = Modifier.size(rs.iconSize()))
+                    Spacer(Modifier.width(rs.itemSpacing(base = 6.dp)))
+                    Text("CONNECT", fontFamily = FontFamily.Monospace, fontSize = rs.bodyFontSize(base = 12f))
                 }
             }
         }
@@ -508,6 +514,7 @@ private fun ChartPage(
     onDisconnect: () -> Unit,
     onSwipePrev: () -> Unit,
     onSwipeNext: () -> Unit,
+    rs: ResponsiveSize = ResponsiveSize(393f, 852f, 2f),
 ) {
     // 当前连接的备注
     val connectedIdx = savedUrls.indexOf(connectedUrl)
@@ -556,8 +563,8 @@ private fun ChartPage(
                     }
                 )
             }
-            .padding(horizontal = 10.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+            .padding(horizontal = rs.cardSpacing(base = 10.dp), vertical = rs.cardSpacing(base = 8.dp)),
+        horizontalArrangement = Arrangement.spacedBy(rs.cardSpacing())
     ) {
         // 列1：网速图（含顶部 Header 行）
         NetworkCard(
@@ -573,17 +580,19 @@ private fun ChartPage(
         // 列2：CPU（上）+ MEM（下）—— 始终不变
         Column(
             modifier = Modifier.weight(3f).fillMaxHeight(),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            verticalArrangement = Arrangement.spacedBy(rs.cardSpacing())
         ) {
             CpuCard(
                 value    = metrics?.cpuUsagePercent ?: 0f,
                 history  = cpuHistory,
+                fontSize = rs.bigFontSize(),
                 modifier = Modifier.fillMaxWidth().weight(1f)
             )
             MemCard(
                 value    = metrics?.memoryUsagePercent ?: 0f,
                 usedMb   = metrics?.memoryUsedMb ?: 0L,
                 totalMb  = metrics?.memoryTotalMb ?: 0L,
+                fontSize = rs.bigFontSize(),
                 modifier = Modifier.fillMaxWidth().weight(1f)
             )
         }
@@ -592,6 +601,7 @@ private fun ChartPage(
         if (gpuValue != null) {
             GpuCard(
                 value    = gpuValue,
+                fontSize = rs.bigFontSize(),
                 modifier = Modifier.weight(2.5f).fillMaxHeight()
             )
         } else if (coreList.isNotEmpty()) {
@@ -613,12 +623,13 @@ private fun NetworkCard(
     onDisconnect: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val rs = rememberResponsiveSize()
     GlassCard(modifier = modifier, accentColor = NetAmber, glowAlignment = GlowAlignment.TopRight) {
         // ── 顶部 Header 行
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(rs.itemSpacing())
         ) {
             // NETWORK 标签
             CardLabel(label = "NET", color = NetAmber)
@@ -628,15 +639,15 @@ private fun NetworkCard(
                 modifier = Modifier
                     .clip(CircleShape)
                     .background(LiveGreenBg)
-                    .padding(horizontal = 8.dp, vertical = 3.dp),
+                    .padding(horizontal = rs.itemSpacing(base = 8.dp), vertical = 3.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                Box(modifier = Modifier.size(5.dp).background(LiveGreen, CircleShape))
+                Box(modifier = Modifier.size(rs.dotSize(base = 5.dp)).background(LiveGreen, CircleShape))
                 Text(
                     text = if (connectedRemark.isNotEmpty()) "$connectedRemark-LIVE" else "LIVE",
                     color = LiveGreen,
-                    fontSize = 9.sp,
+                    fontSize = rs.labelFontSize(base = 9f),
                     fontWeight = FontWeight.SemiBold,
                     fontFamily = FontFamily.Monospace,
                     maxLines = 1,
@@ -651,26 +662,26 @@ private fun NetworkCard(
                     .background(Color(0xCC1A1F2E))
                     .border(1.dp, DangerRed.copy(alpha = 0.3f), RoundedCornerShape(6.dp))
                     .clickable { onDisconnect() }
-                    .padding(horizontal = 8.dp, vertical = 3.dp),
+                    .padding(horizontal = rs.itemSpacing(base = 8.dp), vertical = 3.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 Icon(Icons.Default.LinkOff, null,
-                    tint = DangerRed.copy(alpha = 0.8f), modifier = Modifier.size(11.dp))
-                Text("DISC", color = DangerRed.copy(alpha = 0.8f), fontSize = 9.sp,
+                    tint = DangerRed.copy(alpha = 0.8f), modifier = Modifier.size(rs.labelFontSize(base = 11f).value.dp))
+                Text("DISC", color = DangerRed.copy(alpha = 0.8f), fontSize = rs.labelFontSize(base = 9f),
                     fontWeight = FontWeight.Medium, fontFamily = FontFamily.Monospace)
             }
 
             Spacer(Modifier.weight(1f))
 
             // 图例
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(rs.itemSpacing(base = 10.dp))) {
                 LegendItem(color = NetAmber, label = "RX", arrow = "↓")
                 LegendItem(color = NetPink,  label = "TX", arrow = "↑")
             }
         }
 
-        Spacer(Modifier.height(6.dp))
+        Spacer(Modifier.height(rs.itemSpacing(base = 6.dp)))
 
         // ── 面积图
         DualLineChart(
@@ -679,12 +690,12 @@ private fun NetworkCard(
             modifier = Modifier.fillMaxWidth().weight(1f)
         )
 
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(rs.itemSpacing(base = 8.dp)))
 
         // ── 底部数值行
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(rs.itemSpacing())
         ) {
             CompactSpeedRow(
                 label = "↓", value = formatSpeedValue(rxKbps),
@@ -705,8 +716,11 @@ private fun NetworkCard(
 @Composable
 private fun CpuCard(
     value: Float, history: List<Float>,
+    fontSize: androidx.compose.ui.unit.TextUnit? = null,
     modifier: Modifier = Modifier,
 ) {
+    val rs = rememberResponsiveSize()
+    val actualFontSize = fontSize ?: rs.bigFontSize()
     GlassCard(modifier = modifier, accentColor = CpuGreen, glowAlignment = GlowAlignment.TopLeft) {
         Row(modifier = Modifier.fillMaxSize()) {
             VerticalLabel(label = "CPU", color = CpuGreen)
@@ -725,9 +739,8 @@ private fun CpuCard(
                     )
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(text = "${value.roundToInt()}", color = CpuGreen,
-                            fontSize = 30.sp, fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace, lineHeight = 30.sp)
-                        Text(text = "%", color = TextSecondary, fontSize = 12.sp)
+                            fontSize = actualFontSize, fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace, lineHeight = actualFontSize)
                     }
                 }
             }
@@ -745,13 +758,16 @@ private fun CpuCard(
 @Composable
 private fun GpuCard(
     value: Float,
+    fontSize: androidx.compose.ui.unit.TextUnit? = null,
     modifier: Modifier = Modifier,
 ) {
+    val rs = rememberResponsiveSize()
+    val actualFontSize = fontSize ?: rs.bigFontSize()
     GlassCard(modifier = modifier, accentColor = GpuIndigo, glowAlignment = GlowAlignment.TopLeft) {
         Row(modifier = Modifier.fillMaxSize()) {
             VerticalLabel(label = "GPU", color = GpuIndigo)
             Column(
-                modifier = Modifier.weight(1f).fillMaxHeight().padding(vertical = 6.dp, horizontal = 4.dp),
+                modifier = Modifier.weight(1f).fillMaxHeight().padding(vertical = rs.itemSpacing(), horizontal = 4.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center
             ) {
@@ -759,14 +775,13 @@ private fun GpuCard(
                 Text(
                     text = "${value.roundToInt()}",
                     color = GpuIndigo,
-                    fontSize = 30.sp,
+                    fontSize = actualFontSize,
                     fontWeight = FontWeight.Bold,
                     fontFamily = FontFamily.Monospace,
-                    lineHeight = 30.sp
+                    lineHeight = actualFontSize
                 )
-                Text(text = "%", color = TextSecondary, fontSize = 12.sp)
 
-                Spacer(Modifier.height(6.dp))
+                Spacer(Modifier.height(rs.itemSpacing()))
 
                 // 竖向分段热力柱（20 格，每格 5%）
                 GpuSegmentBar(
@@ -831,8 +846,11 @@ private fun GpuSegmentBar(value: Float, modifier: Modifier = Modifier) {
 @Composable
 private fun MemCard(
     value: Float, usedMb: Long, totalMb: Long,
+    fontSize: androidx.compose.ui.unit.TextUnit? = null,
     modifier: Modifier = Modifier,
 ) {
+    val rs = rememberResponsiveSize()
+    val actualFontSize = fontSize ?: rs.bigFontSize()
     GlassCard(modifier = modifier, accentColor = MemPurple, glowAlignment = GlowAlignment.TopRight) {
         Row(modifier = Modifier.fillMaxSize()) {
             VerticalLabel(label = "MEM", color = MemPurple)
@@ -855,22 +873,21 @@ private fun MemCard(
                         )
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Text(text = "${value.roundToInt()}", color = MemPurple,
-                                fontSize = 30.sp, fontWeight = FontWeight.Bold,
-                                fontFamily = FontFamily.Monospace, lineHeight = 30.sp)
-                            Text(text = "%", color = TextSecondary, fontSize = 12.sp)
+                                fontSize = actualFontSize, fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace, lineHeight = actualFontSize)
                         }
                     }
                 }
                 if (totalMb > 0) {
                     Text(
                         text = "${formatMb(usedMb)} / ${formatMb(totalMb)}",
-                        color = TextSecondary, fontSize = 9.sp,
+                        color = TextSecondary, fontSize = rs.labelFontSize(base = 11f),
                         fontFamily = FontFamily.Monospace, textAlign = TextAlign.Center,
                         modifier = Modifier.fillMaxWidth()
                     )
-                    Spacer(Modifier.height(4.dp))
+                    Spacer(Modifier.height(rs.itemSpacing(base = 4.dp)))
                 }
-                MemProgressBar(percent = value, modifier = Modifier.fillMaxWidth(), height = 7.dp)
+                MemProgressBar(percent = value, modifier = Modifier.fillMaxWidth())
             }
         }
     }
@@ -880,6 +897,7 @@ private fun MemCard(
 
 @Composable
 private fun CoresCard(cores: List<Float>, modifier: Modifier = Modifier) {
+    val rs = rememberResponsiveSize()
     // 阈值：超过 14 核时切换为多列网格模式
     val useGridMode = cores.size > 14
 
@@ -897,15 +915,14 @@ private fun CoresCard(cores: List<Float>, modifier: Modifier = Modifier) {
                     .background(CoreCyan.copy(alpha = 0.15f))
                     .padding(horizontal = 8.dp, vertical = 2.dp)
             ) {
-                Text(text = "${cores.size}c", color = CoreCyan, fontSize = 11.sp,
+                Text(text = "${cores.size}c", color = CoreCyan, fontSize = rs.labelFontSize(),
                     fontWeight = FontWeight.SemiBold, fontFamily = FontFamily.Monospace)
             }
         }
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(rs.itemSpacing()))
 
         if (useGridMode) {
             // ── 超过 14 核：多列网格，去掉 Cx 标签，每行 2 列 ──────────────────
-            // 将 cores 按每组 2 个分行，每个核只展示进度条（无文字标签）
             Column(
                 modifier = Modifier.fillMaxWidth().weight(1f),
                 verticalArrangement = Arrangement.SpaceEvenly
@@ -918,11 +935,10 @@ private fun CoresCard(cores: List<Float>, modifier: Modifier = Modifier) {
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         rowCores.forEachIndexed { _, v ->
-                            Box(modifier = Modifier.weight(1f).height(14.dp)) {
+                            Box(modifier = Modifier.weight(1f).height((14 * rs.scaleFactor).dp)) {
                                 CoreBarChart(coreValues = listOf(v), modifier = Modifier.fillMaxSize())
                             }
                         }
-                        // 若最后一行只有 1 个核，用空白补齐
                         if (rowCores.size == 1) {
                             Spacer(modifier = Modifier.weight(1f))
                         }
@@ -939,11 +955,11 @@ private fun CoresCard(cores: List<Float>, modifier: Modifier = Modifier) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        horizontalArrangement = Arrangement.spacedBy(rs.itemSpacing())
                     ) {
-                        Text(text = "C$i", color = TextSecondary, fontSize = 9.sp,
-                            fontFamily = FontFamily.Monospace, modifier = Modifier.width(18.dp))
-                        Box(modifier = Modifier.weight(1f).height(18.dp)) {
+                        Text(text = "C$i", color = TextSecondary, fontSize = rs.smallFontSize(base = 9f),
+                            fontFamily = FontFamily.Monospace, modifier = Modifier.width((18 * rs.widthScale).dp))
+                        Box(modifier = Modifier.weight(1f).height((18 * rs.scaleFactor).dp)) {
                             CoreBarChart(coreValues = listOf(v), modifier = Modifier.fillMaxSize())
                         }
                         Text(
@@ -953,8 +969,8 @@ private fun CoresCard(cores: List<Float>, modifier: Modifier = Modifier) {
                                 v > 20f -> CoreBlue
                                 else    -> TextSecondary
                             },
-                            fontSize = 9.sp, fontFamily = FontFamily.Monospace,
-                            modifier = Modifier.width(26.dp)
+                            fontSize = rs.smallFontSize(base = 9f), fontFamily = FontFamily.Monospace,
+                            modifier = Modifier.width((26 * rs.widthScale).dp)
                         )
                     }
                 }
@@ -967,8 +983,9 @@ private fun CoresCard(cores: List<Float>, modifier: Modifier = Modifier) {
 
 @Composable
 private fun VerticalLabel(label: String, color: Color) {
+    val rs = rememberResponsiveSize()
     Box(
-        modifier = Modifier.fillMaxHeight().width(22.dp),
+        modifier = Modifier.fillMaxHeight().width((22 * rs.scaleFactor).dp),
         contentAlignment = Alignment.Center
     ) {
         Column(
@@ -976,12 +993,12 @@ private fun VerticalLabel(label: String, color: Color) {
             verticalArrangement = Arrangement.Center,
             modifier = Modifier.fillMaxHeight()
         ) {
-            Box(modifier = Modifier.size(6.dp).background(color, CircleShape))
-            Spacer(Modifier.height(6.dp))
+            Box(modifier = Modifier.size(rs.dotSize()).background(color, CircleShape))
+            Spacer(Modifier.height(rs.itemSpacing()))
             label.forEach { ch ->
-                Text(text = ch.toString(), color = color, fontSize = 11.sp,
+                Text(text = ch.toString(), color = color, fontSize = rs.labelFontSize(),
                     fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace,
-                    letterSpacing = 0.sp, lineHeight = 14.sp)
+                    letterSpacing = 0.sp, lineHeight = rs.bodyFontSize(base = 14f))
             }
         }
     }
@@ -994,16 +1011,17 @@ private fun CompactSpeedRow(
     label: String, value: String, unit: String, color: Color,
     modifier: Modifier = Modifier,
 ) {
+    val rs = rememberResponsiveSize()
     Row(
         modifier = modifier,
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp)
     ) {
-        Box(modifier = Modifier.size(7.dp).background(color, CircleShape))
-        Text(text = label, color = TextSecondary, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
-        Text(text = value, color = Color.White, fontSize = 18.sp,
+        Box(modifier = Modifier.size(rs.dotSize(base = 7.dp)).background(color, CircleShape))
+        Text(text = label, color = TextSecondary, fontSize = rs.labelFontSize(), fontFamily = FontFamily.Monospace)
+        Text(text = value, color = Color.White, fontSize = rs.bigFontSize(base = 18f),
             fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
-        Text(text = unit, color = TextSecondary, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+        Text(text = unit, color = TextSecondary, fontSize = rs.smallFontSize(), fontFamily = FontFamily.Monospace)
     }
 }
 
@@ -1011,12 +1029,13 @@ private fun CompactSpeedRow(
 
 @Composable
 private fun LegendItem(color: Color, label: String, arrow: String) {
+    val rs = rememberResponsiveSize()
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(3.dp)
     ) {
-        Text(text = arrow, color = color, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
-        Text(text = label, color = color, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+        Text(text = arrow, color = color, fontSize = rs.smallFontSize(), fontFamily = FontFamily.Monospace)
+        Text(text = label, color = color, fontSize = rs.smallFontSize(), fontFamily = FontFamily.Monospace)
     }
 }
 

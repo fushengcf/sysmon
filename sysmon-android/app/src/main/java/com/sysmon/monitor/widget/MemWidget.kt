@@ -76,13 +76,10 @@ private fun MemContent(mem: Float, usedMb: Long, totalMb: Long, connected: Boole
         Spacer(GlanceModifier.height(8.dp))
 
         if (connected) {
-            Row(verticalAlignment = Alignment.Bottom) {
-                Text(
-                    "${mem.roundToInt()}",
-                    style = TextStyle(color = valueColor, fontSize = 36.sp, fontWeight = FontWeight.Bold)
-                )
-                Text("%", style = TextStyle(color = valueColor, fontSize = 16.sp))
-            }
+            Text(
+                "${mem.roundToInt()}",
+                style = TextStyle(color = valueColor, fontSize = 36.sp, fontWeight = FontWeight.Bold)
+            )
 
             if (totalMb > 0) {
                 Spacer(GlanceModifier.height(4.dp))

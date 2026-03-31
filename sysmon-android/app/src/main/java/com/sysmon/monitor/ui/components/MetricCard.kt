@@ -32,7 +32,8 @@ fun GlassCard(
     glowAlignment: GlowAlignment = GlowAlignment.TopRight,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    val shape = RoundedCornerShape(20.dp)
+    val rs = rememberResponsiveSize()
+    val shape = RoundedCornerShape((20 * rs.scaleFactor).dp)
 
     Box(modifier = modifier) {
         // 角落光晕（模拟设计稿的 blur-3xl 效果）
@@ -59,7 +60,7 @@ fun GlassCard(
                     ),
                     shape = shape
                 )
-                .padding(16.dp),
+                .padding(rs.cardPadding()),
             content = content
         )
     }
@@ -105,15 +106,16 @@ fun CardLabel(
     color: Color,
     modifier: Modifier = Modifier,
 ) {
+    val rs = rememberResponsiveSize()
     Row(
         modifier = modifier,
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+        horizontalArrangement = Arrangement.spacedBy(rs.itemSpacing())
     ) {
         // 发光色点
         Box(
             modifier = Modifier
-                .size(10.dp)
+                .size(rs.dotSize(base = 10.dp))
                 .background(color, CircleShape)
                 .drawBehind {
                     drawCircle(
@@ -125,9 +127,9 @@ fun CardLabel(
         Text(
             text = label,
             color = Color.White,
-            fontSize = 13.sp,
+            fontSize = rs.bodyFontSize(),
             fontWeight = FontWeight.Bold,
-            letterSpacing = 1.5.sp,
+            letterSpacing = (1.5 * rs.scaleFactor).sp,
             fontFamily = FontFamily.Monospace
         )
     }
@@ -142,9 +144,11 @@ fun BigValueText(
     value: String,
     unit: String,
     color: Color,
-    valueFontSize: androidx.compose.ui.unit.TextUnit = 44.sp,
+    valueFontSize: androidx.compose.ui.unit.TextUnit? = null,
     modifier: Modifier = Modifier,
 ) {
+    val rs = rememberResponsiveSize()
+    val fontSize = valueFontSize ?: rs.bigFontSize(base = 44f)
     Row(
         modifier = modifier,
         verticalAlignment = Alignment.Bottom,
@@ -153,15 +157,15 @@ fun BigValueText(
         Text(
             text = value,
             color = color,
-            fontSize = valueFontSize,
+            fontSize = fontSize,
             fontWeight = FontWeight.Bold,
             fontFamily = FontFamily.Monospace,
-            lineHeight = valueFontSize
+            lineHeight = fontSize
         )
         Text(
             text = unit,
             color = TextSecondary,
-            fontSize = 16.sp,
+            fontSize = rs.bodyFontSize(base = 16f),
             fontWeight = FontWeight.Medium,
             modifier = Modifier.padding(bottom = 6.dp)
         )
@@ -180,34 +184,35 @@ fun NetSpeedRow(
     color: Color,
     modifier: Modifier = Modifier,
 ) {
+    val rs = rememberResponsiveSize()
     Row(
         modifier = modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp)
+        horizontalArrangement = Arrangement.spacedBy(rs.itemSpacing(base = 10.dp))
     ) {
         Box(
             modifier = Modifier
-                .size(10.dp)
+                .size(rs.dotSize(base = 10.dp))
                 .background(color, CircleShape)
         )
         Text(
             text = label,
             color = TextSecondary,
-            fontSize = 13.sp,
+            fontSize = rs.bodyFontSize(),
             fontFamily = FontFamily.Monospace,
-            modifier = Modifier.width(20.dp)
+            modifier = Modifier.width((20 * rs.widthScale).dp)
         )
         Text(
             text = value,
             color = Color.White,
-            fontSize = 22.sp,
+            fontSize = rs.bigFontSize(base = 22f),
             fontWeight = FontWeight.Bold,
             fontFamily = FontFamily.Monospace
         )
         Text(
             text = unit,
             color = TextSecondary,
-            fontSize = 12.sp,
+            fontSize = rs.smallFontSize(base = 12f),
             modifier = Modifier.padding(bottom = 2.dp)
         )
     }
@@ -221,13 +226,15 @@ fun NetSpeedRow(
 fun MemProgressBar(
     percent: Float,
     modifier: Modifier = Modifier,
-    height: Dp = 10.dp,
+    height: Dp? = null,
 ) {
+    val rs = rememberResponsiveSize()
+    val barHeight = height ?: (10 * rs.scaleFactor).dp
     val shape = RoundedCornerShape(50)
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .height(height)
+            .height(barHeight)
             .clip(shape)
             .background(BgSlate)
     ) {

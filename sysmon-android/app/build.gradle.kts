@@ -10,8 +10,8 @@ android {
 
     defaultConfig {
         applicationId = "com.sysmon.monitor"
-        minSdk = 23
-        targetSdk = 34
+        minSdk = 22
+        targetSdk = 22
         versionCode = 1
         versionName = "1.0"
     }

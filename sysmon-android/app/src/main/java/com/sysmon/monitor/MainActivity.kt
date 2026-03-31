@@ -181,7 +181,7 @@ class MainActivity : ComponentActivity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
         // 3. 用 FULL_WAKE_LOCK + ACQUIRE_CAUSES_WAKEUP 唤醒屏幕（短暂持有 2s）
-        val pm = getSystemService(PowerManager::class.java)
+        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
         val wl = pm.newWakeLock(
             PowerManager.FULL_WAKE_LOCK or
             PowerManager.ACQUIRE_CAUSES_WAKEUP or
@@ -192,7 +192,7 @@ class MainActivity : ComponentActivity() {
 
         // 4. API 27+ 请求解除锁屏
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
-            val km = getSystemService(KeyguardManager::class.java)
+            val km = getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
             km?.requestDismissKeyguard(this, null)
         }
 
@@ -236,7 +236,7 @@ class MainActivity : ComponentActivity() {
 
     private fun requestIgnoreBatteryOptimizations() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return
-        val pm = getSystemService(PowerManager::class.java) ?: return
+        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager? ?: return
         if (pm.isIgnoringBatteryOptimizations(packageName)) return
 
         try {

@@ -324,7 +324,7 @@ class SysMonForegroundService : Service() {
 
     private fun acquireWakeLock() {
         if (wakeLock?.isHeld == true) return
-        val pm = getSystemService(PowerManager::class.java)
+        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
         wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "SysMon::WsKeepAlive")
             .also { it.acquire(0L) }
     }
