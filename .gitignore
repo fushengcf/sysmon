@@ -1,9 +1,11 @@
 # Rust / sysmon-ws
 sysmon-ws/target/
 sysmon-ws/dist/
+sysmon-ws-docker/target/
 
 # Android / sysmon-android
 sysmon-android/.gradle/
+sysmon-android/.kotlin/
 sysmon-android/build/
 sysmon-android/app/build/
 sysmon-android/local.properties
