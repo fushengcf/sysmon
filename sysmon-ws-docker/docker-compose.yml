@@ -1,0 +1,26 @@
+version: "3.8"
+
+services:
+  sysmon-ws:
+    build: .
+    container_name: sysmon-ws
+    restart: unless-stopped
+    ports:
+      - "9527:9527"
+    environment:
+      - LISTEN_ADDR=0.0.0.0:9527
+      - INTERVAL_MS=1000
+      - RUST_LOG=info
+    # 需要 host 网络模式来采集宿主机的网络数据
+    # 如果用 bridge 模式，采集到的是容器内部的网速
+    network_mode: host
+    # 容器需要读取宿主机 /proc 来获取系统信息
+    # sysinfo 库通过 /proc/stat, /proc/meminfo, /proc/net/dev 采集数据
+    volumes:
+      - /proc:/host/proc:ro
+    # 限制资源
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128M

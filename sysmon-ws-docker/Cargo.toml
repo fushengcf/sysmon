@@ -1,0 +1,28 @@
+[package]
+name = "sysmon-ws-docker"
+version = "0.1.0"
+edition = "2021"
+description = "System monitor WebSocket service for Docker/Linux deployment"
+
+[[bin]]
+name = "sysmon-ws-docker"
+path = "src/main.rs"
+
+[dependencies]
+sysinfo = "0.30"
+tokio = { version = "1", features = ["full"] }
+tokio-tungstenite = "0.21"
+tungstenite = "0.21"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+futures-util = "0.3"
+chrono = { version = "0.4", features = ["serde"] }
+anyhow = "1"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
