@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>sysmon-ws — 系统监控实时面板</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'SF Mono','Consolas',monospace;background:#0d1117;color:#c9d1d9;padding:16px;max-width:960px;margin:0 auto}
+
+/* connection bar */
+.conn-bar{display:flex;align-items:center;gap:8px;margin-bottom:16px;flex-wrap:wrap}
+.conn-bar h1{font-size:1.2rem;color:#58a6ff;margin-right:auto}
+.conn-dot{width:10px;height:10px;border-radius:50%;display:inline-block}
+.dot-idle{background:#8b949e}.dot-ok{background:#3fb950}.dot-err{background:#f85149}
+.conn-text{font-size:.78rem;color:#8b949e}
+select,input[type=text]{background:#21262d;border:1px solid #30363d;color:#c9d1d9;padding:4px 8px;border-radius:4px;font-size:.78rem}
+select{cursor:pointer}
+button{padding:4px 12px;border:none;border-radius:4px;cursor:pointer;font-size:.78rem}
+.btn-conn{background:#1f6feb;color:#fff}
+.btn-disc{background:#21262d;color:#c9d1d9;border:1px solid #30363d}
+
+/* sections */
+.section{margin-bottom:20px}
+.section-title{font-size:.82rem;color:#8b949e;margin-bottom:8px;display:flex;align-items:center;gap:6px}
+.section-title svg{width:14px;height:14px}
+
+/* gauge */
+.gauge-row{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media(max-width:560px){.gauge-row{grid-template-columns:1fr}}
+.gauge-card{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:14px;overflow:hidden}
+.gauge-wrap{position:relative;width:120px;height:70px;margin:0 auto 8px}
+.gauge-wrap svg{width:100%;height:100%}
+.gauge-label{position:absolute;bottom:2px;left:50%;transform:translateX(-50%);text-align:center}
+.gauge-value{font-size:1.5rem;font-weight:bold;color:#e6edf3}
+.gauge-unit{font-size:.7rem;color:#8b949e;display:block}
+.gauge-detail{font-size:.72rem;color:#8b949e;text-align:center;margin-top:4px}
+.mini-chart{height:50px;margin-top:6px}
+
+/* per-core */
+.core-bars{display:flex;flex-wrap:wrap;gap:6px}
+.core-item{flex:1;min-width:50px;max-width:80px}
+.core-label{font-size:.65rem;color:#8b949e;margin-bottom:2px;text-align:center}
+.core-bar-bg{background:#21262d;border-radius:3px;height:40px;position:relative;overflow:hidden}
+.core-bar-fill{position:absolute;bottom:0;left:0;width:100%;border-radius:3px;transition:height .4s ease;background:#58a6ff}
+.core-pct{font-size:.65rem;color:#8b949e;text-align:center;margin-top:2px}
+
+/* net */
+.net-card{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:14px}
+.net-legend{display:flex;gap:16px;font-size:.72rem;color:#8b949e;margin-bottom:6px}
+.net-legend span{display:flex;align-items:center;gap:4px}
+.net-legend i{width:10px;height:3px;border-radius:2px;display:inline-block}
+</style>
+</head>
+<body>
+
+<div class="conn-bar">
+  <h1>⚡ sysmon-ws 实时监控</h1>
+  <span class="conn-dot dot-idle" id="dot"></span>
+  <span class="conn-text" id="connText">未连接</span>
+  <select id="proto">
+    <option value="/ws">/ws (相对)</option>
+    <option value="ws://">ws://</option>
+    <option value="wss://">wss://</option>
+  </select>
+  <input type="text" id="host" placeholder="host:port 或 /ws" value="/ws" style="width:160px"/>
+  <button class="btn-conn" onclick="doConnect()">连接</button>
+  <button class="btn-disc" onclick="doDisconnect()">断开</button>
+</div>
+
+<!-- CPU -->
+<div class="section">
+  <div class="section-title">
+    <svg viewBox="0 0 24 24" fill="none" stroke="#58a6ff" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><line x1="9" y1="1" x2="9" y2="4"/><line x1="15" y1="1" x2="15" y2="4"/><line x1="9" y1="20" x2="9" y2="23"/><line x1="15" y1="20" x2="15" y2="23"/><line x1="20" y1="9" x2="23" y2="9"/><line x1="20" y1="15" x2="23" y2="15"/><line x1="1" y1="9" x2="4" y2="9"/><line x1="1" y1="15" x2="4" y2="15"/></svg>
+    CPU
+  </div>
+  <div class="gauge-row">
+    <div class="gauge-card">
+      <div class="gauge-wrap">
+        <svg viewBox="0 0 120 70" id="cpuGaugeSvg">
+          <path d="M10 65 A50 50 0 0 1 110 65" fill="none" stroke="#21262d" stroke-width="8" stroke-linecap="round"/>
+          <path d="M10 65 A50 50 0 0 1 110 65" fill="none" stroke="#58a6ff" stroke-width="8" stroke-linecap="round"
+                stroke-dasharray="157" stroke-dashoffset="157" id="cpuArc"/>
+        </svg>
+        <div class="gauge-label"><span class="gauge-value" id="cpuVal">--</span><span class="gauge-unit">%</span></div>
+      </div>
+      <div class="gauge-detail" id="cpuCoreDetail">--</div>
+      <div class="mini-chart"><canvas id="cpuMini"></canvas></div>
+    </div>
+    <div class="gauge-card">
+      <div class="gauge-wrap">
+        <svg viewBox="0 0 120 70" id="memGaugeSvg">
+          <path d="M10 65 A50 50 0 0 1 110 65" fill="none" stroke="#21262d" stroke-width="8" stroke-linecap="round"/>
+          <path d="M10 65 A50 50 0 0 1 110 65" fill="none" stroke="#3fb950" stroke-width="8" stroke-linecap="round"
+                stroke-dasharray="157" stroke-dashoffset="157" id="memArc"/>
+        </svg>
+        <div class="gauge-label"><span class="gauge-value" id="memVal">--</span><span class="gauge-unit">%</span></div>
+      </div>
+      <div class="gauge-detail" id="memDetail">-- / -- MB</div>
+      <div class="mini-chart"><canvas id="memMini"></canvas></div>
+    </div>
+  </div>
+</div>
+
+<!-- per-core -->
+<div class="section" id="coresSection" style="display:none">
+  <div class="section-title">Per-Core CPU</div>
+  <div class="core-bars" id="coreBars"></div>
+</div>
+
+<!-- network -->
+<div class="section">
+  <div class="section-title">Network</div>
+  <div class="net-card">
+    <div class="net-legend">
+      <span><i style="background:#f97583"></i> RX (↓)</span>
+      <span><i style="background:#79c0ff"></i> TX (↑)</span>
+    </div>
+    <canvas id="netChart" height="140"></canvas>
+  </div>
+</div>
+
+<script>
+const HIST = 60;
+const ARC_LEN = 157;
+
+let ws = null;
+let reconnectTimer = null;
+let cpuHist = [], memHist = [], rxHist = [], txHist = [];
+let coreCount = 0;
+
+// ---- charts ----
+const labels = Array.from({length: HIST}, () => '');
+const miniOpts = {
+  responsive:true, animation:false, maintainAspectRatio:false,
+  plugins:{legend:{display:false}},
+  scales:{x:{display:false},y:{display:false,min:0,max:100}}
+};
+
+const cpuMiniChart = new Chart(document.getElementById('cpuMini'),{
+  type:'bar',
+  data:{labels, datasets:[{data:cpuHist, backgroundColor:'#58a6ff', barPercentage:1, borderWidth:0}]},
+  options:{...miniOpts}
+});
+const memMiniChart = new Chart(document.getElementById('memMini'),{
+  type:'bar',
+  data:{labels, datasets:[{data:memHist, backgroundColor:'#3fb950', barPercentage:1, borderWidth:0}]},
+  options:{...miniOpts}
+});
+const netChart = new Chart(document.getElementById('netChart'),{
+  type:'line',
+  data:{labels, datasets:[
+    {data:rxHist, borderColor:'#f97583', borderWidth:1.5, pointRadius:0, fill:false, tension:.3},
+    {data:txHist, borderColor:'#79c0ff', borderWidth:1.5, pointRadius:0, fill:false, tension:.3}
+  ]},
+  options:{
+    responsive:true, animation:false, maintainAspectRatio:false,
+    plugins:{legend:{display:false}},
+    scales:{
+      x:{display:false},
+      y:{display:true, beginAtZero:true, grid:{color:'#21262d'},
+         ticks:{color:'#8b949e', font:{size:9},
+           callback: v => v > 1000 ? (v/1000).toFixed(1) + ' MB/s' : v + ' KB/s'}}
+    }
+  }
+});
+
+// ---- gauge helper ----
+function setArc(id, pct){
+  const c = Math.max(0, Math.min(100, pct));
+  document.getElementById(id).setAttribute('stroke-dashoffset', ARC_LEN - (c/100)*ARC_LEN);
+}
+
+// ---- core bars ----
+function ensureCoreBars(n){
+  if(n === coreCount) return;
+  coreCount = n;
+  const el = document.getElementById('coreBars');
+  el.innerHTML = '';
+  for(let i=0; i<n; i++){
+    const item = document.createElement('div');
+    item.className = 'core-item';
+    item.innerHTML =
+      `<div class="core-label">C${i}</div>` +
+      `<div class="core-bar-bg"><div class="core-bar-fill" id="coreBar${i}" style="height:0%"></div></div>` +
+      `<div class="core-pct" id="corePct${i}">0%</div>`;
+    el.appendChild(item);
+  }
+  document.getElementById('coresSection').style.display = n > 0 ? '' : 'none';
+}
+
+// ---- update ----
+function push(arr, val){
+  arr.push(val);
+  if(arr.length > HIST) arr.shift();
+}
+
+function updateUI(d){
+  const cpu = d.cpu_usage_percent ?? 0;
+  const mem = d.memory_usage_percent ?? 0;
+  const rx  = d.net_rx_kbps ?? 0;
+  const tx  = d.net_tx_kbps ?? 0;
+
+  setArc('cpuArc', cpu);
+  setArc('memArc', mem);
+  document.getElementById('cpuVal').textContent = cpu.toFixed(1);
+  document.getElementById('memVal').textContent = mem.toFixed(1);
+  document.getElementById('memDetail').textContent = d.memory_used_mb + ' / ' + d.memory_total_mb + ' MB';
+
+  push(cpuHist, cpu); push(memHist, mem); push(rxHist, rx); push(txHist, tx);
+  cpuMiniChart.update(); memMiniChart.update(); netChart.update();
+
+  const cores = d.cpu_per_core || [];
+  if(cores.length > 0){
+    ensureCoreBars(cores.length);
+    cores.forEach((v, i) => {
+      document.getElementById('coreBar' + i).style.height = Math.max(0, Math.min(100, v)) + '%';
+      document.getElementById('corePct' + i).textContent = v.toFixed(0) + '%';
+    });
+    document.getElementById('cpuCoreDetail').textContent =
+      cores.map((v, i) => 'C' + i + ':' + v.toFixed(0) + '%').join('  ');
+  }
+}
+
+// ---- connection ----
+function setConn(state, text){
+  const dot = document.getElementById('dot');
+  const txt = document.getElementById('connText');
+  dot.className = 'conn-dot ' + (state==='ok'?'dot-ok':state==='err'?'dot-err':'dot-idle');
+  txt.textContent = text;
+}
+
+function getWsUrl(){
+  return document.getElementById('proto').value + document.getElementById('host').value.trim();
+}
+
+function doConnect(){
+  if(ws){ ws.onclose=null; ws.close(); ws=null; }
+  if(reconnectTimer){ clearTimeout(reconnectTimer); reconnectTimer=null; }
+
+  const url = getWsUrl();
+  setConn('idle', '连接中… ' + url);
+  ws = new WebSocket(url);
+
+  ws.onopen = function(){ setConn('ok', '已连接 ' + url); };
+  ws.onclose = function(){
+    setConn('err', '已断开');
+    ws = null;
+    reconnectTimer = setTimeout(function(){ doConnect(); }, 3000);
+  };
+  ws.onerror = function(){ setConn('err', '连接错误'); };
+  ws.onmessage = function(e){
+    try { updateUI(JSON.parse(e.data)); } catch(_){}
+  };
+}
+
+function doDisconnect(){
+  if(reconnectTimer){ clearTimeout(reconnectTimer); reconnectTimer=null; }
+  if(ws){ ws.onclose=null; ws.close(); ws=null; }
+  setConn('idle', '未连接');
+}
+
+// auto-connect on load
+doConnect();
+</script>
+</body>
+</html>
