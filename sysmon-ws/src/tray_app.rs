@@ -12,6 +12,13 @@ use std::time::{Duration, Instant};
 
 // ─── 配置持久化 ───────────────────────────────────────────────────────────────
 
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Serialize, Deserialize)]
+struct Config {
+    ws_enabled: bool,
+}
+
 /// 获取配置文件路径：~/Library/Application Support/sysmon-ws/config.json
 fn config_path() -> std::path::PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
@@ -27,9 +34,8 @@ fn config_path() -> std::path::PathBuf {
 fn load_ws_enabled() -> bool {
     let path = config_path();
     if let Ok(content) = std::fs::read_to_string(&path) {
-        // 简单解析：查找 "ws_enabled":true
-        if content.contains("\"ws_enabled\":true") || content.contains("\"ws_enabled\": true") {
-            return true;
+        if let Ok(config) = serde_json::from_str::<Config>(&content) {
+            return config.ws_enabled;
         }
     }
     false
@@ -38,8 +44,10 @@ fn load_ws_enabled() -> bool {
 /// 将 ws_enabled 状态写入配置文件
 fn save_ws_enabled(enabled: bool) {
     let path = config_path();
-    let content = format!("{{\"ws_enabled\":{}}}", enabled);
-    let _ = std::fs::write(&path, content);
+    let config = Config { ws_enabled: enabled };
+    if let Ok(json) = serde_json::to_string_pretty(&config) {
+        let _ = std::fs::write(&path, json);
+    }
 }
 
 // ─── 网络工具 ─────────────────────────────────────────────────────────────────
@@ -146,7 +154,8 @@ use winit::platform::pump_events::{EventLoopExtPumpEvents, PumpStatus};
 #[cfg(target_os = "macos")]
 use crate::statusbar_view::macos as sb;
 
-use crate::metrics::{MetricsCollector, NetOnlyCollector, SystemMetrics};
+use sysmon_core::metrics::{MetricsCollector, NetOnlyCollector, SystemMetrics};
+use sysmon_core::server;
 
 // ─── 共享状态 ─────────────────────────────────────────────────────────────────
 
@@ -284,7 +293,7 @@ pub fn run() {
                         state.ws_running.store(false, Ordering::SeqCst);
                         save_ws_enabled(false);
                         tracing::info!("WebSocket service stopped by user (net collection continues)");
-                        
+
                         // 手动关闭服务时，立即隐藏统计行
                         unsafe {
                             set_stats_items_hidden(
@@ -597,7 +606,7 @@ fn start_server(
             tracing::info!("WebSocket server starting on ws://{}", addr);
             tokio::select! {
                 result = async {
-                    match crate::server::run_server(&addr, interval_ms).await {
+                    match server::run_server(&addr, interval_ms).await {
                         Ok(server_conn_count) => {
                             // 将 server 内部的连接计数器同步到外部
                             // 用一个轮询任务每 200ms 同步一次

@@ -1,0 +1,8 @@
+[workspace]
+members = [
+    "sysmon-core",
+    "sysmon-ws",
+    "sysmon-un",
+    "sysmon-ws-docker",
+]
+resolver = "2"

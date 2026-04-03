@@ -6,8 +6,6 @@
 ///   - 系统托盘图标 + 右键菜单（D-Bus StatusNotifierItem）
 ///
 /// Ubuntu 25 兼容：ksni → D-Bus SNI，支持 GNOME / KDE / X11 / Wayland
-mod metrics;
-mod server;
 mod tray;
 
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -16,7 +14,8 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
-use metrics::{MetricsCollector, NetOnlyCollector};
+use sysmon_core::metrics::{MetricsCollector, NetOnlyCollector};
+use sysmon_core::server;
 
 const WS_PORT: u16 = 9001;
 const INTERVAL_MS: u64 = 1000;

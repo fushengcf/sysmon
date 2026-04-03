@@ -1,7 +1,7 @@
 FROM rust:1.85-bookworm AS builder
 
 WORKDIR /app
-COPY Cargo.toml ./
+COPY Cargo.toml Cargo.lock ../Cargo.toml ../Cargo.lock ../sysmon-core/ ./
 # 创建空 src 以便缓存依赖
 RUN mkdir src && echo "fn main(){}" > src/main.rs
 RUN cargo build --release 2>/dev/null || true
@@ -25,5 +25,8 @@ ENV INTERVAL_MS=1000
 ENV RUST_LOG=info
 
 EXPOSE 9527
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD bash -c 'echo > /dev/tcp/localhost/9527' || exit 1
 
 CMD ["sysmon-ws-docker"]

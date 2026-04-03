@@ -2,8 +2,6 @@
 ///
 /// macOS 系统托盘应用，内嵌 WebSocket 服务器
 /// 托盘菜单显示实时 CPU / 内存 / 网速，支持启停服务
-mod metrics;
-mod server;
 mod statusbar_view;
 mod tray_app;
 

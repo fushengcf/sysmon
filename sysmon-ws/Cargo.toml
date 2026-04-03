@@ -11,6 +11,8 @@ name = "sysmon-ws"
 path = "src/main.rs"
 
 [dependencies]
+sysmon-core = { path = "../sysmon-core" }
+
 # 系统信息采集 - 跨平台支持 macOS / Windows / Linux
 sysinfo = "0.30"
 

@@ -1,5 +1,4 @@
-mod metrics;
-mod server;
+use sysmon_core::server;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
