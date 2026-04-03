@@ -24,6 +24,6 @@ COPY client-demo.html /usr/share/nginx/html/index.html
 RUN mkdir -p /var/run/nginx && \
     chown -R www-data:www-data /var/run/nginx
 
-EXPOSE 80 9527
+EXPOSE 9002 9001
 
 CMD ["/bin/sh", "-c", "/usr/local/bin/sysmon-ws-docker & nginx -g 'daemon off;'"]
