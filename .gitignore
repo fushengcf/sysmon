@@ -3,6 +3,12 @@ sysmon-ws/target/
 sysmon-ws/dist/
 sysmon-ws-docker/target/
 
+# Deploy scripts (contain sensitive credentials)
+deploy.sh
+deploy.bat
+deploy.ps1
+sysmon-ws-docker/deploy.py
+
 # Android / sysmon-android
 sysmon-android/.gradle/
 sysmon-android/.kotlin/
