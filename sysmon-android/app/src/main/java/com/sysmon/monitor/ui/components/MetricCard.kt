@@ -30,10 +30,12 @@ fun GlassCard(
     modifier: Modifier = Modifier,
     accentColor: Color = NeonBlue,
     glowAlignment: GlowAlignment = GlowAlignment.TopRight,
+    contentPadding: Dp? = null,   // null 则使用默认 rs.cardPadding()
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val rs = rememberResponsiveSize()
     val shape = RoundedCornerShape((20 * rs.scaleFactor).dp)
+    val padding = contentPadding ?: rs.cardPadding()
 
     Box(modifier = modifier) {
         // 角落光晕（模拟设计稿的 blur-3xl 效果）
@@ -60,7 +62,7 @@ fun GlassCard(
                     ),
                     shape = shape
                 )
-                .padding(rs.cardPadding()),
+                .padding(padding),
             content = content
         )
     }
@@ -229,36 +231,53 @@ fun MemProgressBar(
     height: Dp? = null,
 ) {
     val rs = rememberResponsiveSize()
-    val barHeight = height ?: (10 * rs.scaleFactor).dp
+    val barHeight = height ?: (22 * rs.scaleFactor).dp
     val shape = RoundedCornerShape(50)
+    val fraction = (percent / 100f).coerceIn(0f, 1f)
+
+    // 动画
+    val animatedFraction = androidx.compose.animation.core.animateFloatAsState(
+        targetValue = fraction,
+        animationSpec = androidx.compose.animation.core.tween(600)
+    ).value
+
     Box(
         modifier = modifier
             .fillMaxWidth()
             .height(barHeight)
-            .clip(shape)
-            .background(BgSlate)
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxHeight()
-                .fillMaxWidth(fraction = (percent / 100f).coerceIn(0f, 1f))
-                .clip(shape)
-                .background(
-                    brush = Brush.horizontalGradient(
-                        colors = listOf(MemPurpleDim, MemPink)
+            // 外圈细线描边（参考图的白色圆角外框）
+            .border(
+                width = 1.2.dp,
+                brush = Brush.horizontalGradient(
+                    colors = listOf(
+                        Color.White.copy(alpha = 0.55f),
+                        Color.White.copy(alpha = 0.25f)
                     )
-                )
-                .drawBehind {
-                    // 发光效果
-                    drawRect(
+                ),
+                shape = shape
+            )
+            // 轨道背景（半透明深色）
+            .clip(shape)
+            .background(Color(0x22FFFFFF)),
+        contentAlignment = Alignment.CenterStart
+    ) {
+        // 填充块：左侧亮白胶囊（参考图样式）
+        if (animatedFraction > 0f) {
+            Box(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .fillMaxWidth(fraction = animatedFraction)
+                    .padding(3.dp)       // 内缩让填充块不贴边，形成圆角轨道感
+                    .clip(shape)
+                    .background(
                         brush = Brush.horizontalGradient(
                             colors = listOf(
-                                MemPurple.copy(alpha = 0f),
-                                MemPurple.copy(alpha = 0.4f)
+                                Color.White.copy(alpha = 0.95f),
+                                Color.White.copy(alpha = 0.60f)
                             )
                         )
                     )
-                }
-        )
+            )
+        }
     }
 }

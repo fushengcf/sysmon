@@ -35,6 +35,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -66,6 +67,7 @@ fun MonitorScreen(vm: MonitorViewModel = viewModel()) {
     val savedRemarks   by vm.savedRemarks.collectAsStateWithLifecycle()
     val autoConnecting by vm.autoConnecting.collectAsStateWithLifecycle()
     val connectedUrl   by vm.connectedUrl.collectAsStateWithLifecycle()
+    val cookie         by vm.cookie.collectAsStateWithLifecycle()
 
     LaunchedEffect(wsState) {
         if (wsState is WsState.Connected) vm.saveCurrentUrl()
@@ -100,6 +102,7 @@ fun MonitorScreen(vm: MonitorViewModel = viewModel()) {
                     savedUrls          = savedUrls,
                     savedRemarks       = savedRemarks,
                     autoConnecting     = autoConnecting,
+                    cookie             = cookie,
                     onUrlChange        = vm::updateUrl,
                     onConnect          = vm::connect,
                     onDisconnect       = vm::disconnect,
@@ -107,6 +110,7 @@ fun MonitorScreen(vm: MonitorViewModel = viewModel()) {
                     onConnectTo        = vm::connectTo,
                     onRemoveUrl        = vm::removeUrl,
                     onSaveRemark       = vm::saveRemark,
+                    onSaveCookie       = vm::saveCookie,
                 )
                 Page.CHART -> ChartPage(
                     wsState      = wsState,
@@ -139,6 +143,7 @@ private fun ConnectPage(
     savedUrls: List<String>,
     savedRemarks: List<String>,
     autoConnecting: Boolean,
+    cookie: String,
     onUrlChange: (String) -> Unit,
     onConnect: () -> Unit,
     onDisconnect: () -> Unit,
@@ -146,6 +151,7 @@ private fun ConnectPage(
     onConnectTo: (String) -> Unit,
     onRemoveUrl: (String) -> Unit,
     onSaveRemark: (String, String) -> Unit,
+    onSaveCookie: (String) -> Unit,
 ) {
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(
@@ -159,8 +165,9 @@ private fun ConnectPage(
             ConnectPageHeader(wsState = wsState, autoConnecting = autoConnecting)
             ConnectionCard(
                 wsUrl = wsUrl, wsState = wsState, autoConnecting = autoConnecting,
+                cookie = cookie,
                 onUrlChange = onUrlChange, onConnect = onConnect, onDisconnect = onDisconnect,
-                onCancelConnect = onCancelConnect,
+                onCancelConnect = onCancelConnect, onSaveCookie = onSaveCookie,
             )
             if (savedUrls.isNotEmpty()) {
                 SavedUrlsCard(
@@ -211,14 +218,20 @@ private fun ConnectPageHeader(wsState: WsState, autoConnecting: Boolean) {
 @Composable
 private fun ConnectionCard(
     wsUrl: String, wsState: WsState, autoConnecting: Boolean,
+    cookie: String,
     onUrlChange: (String) -> Unit, onConnect: () -> Unit, onDisconnect: () -> Unit,
-    onCancelConnect: () -> Unit,
+    onCancelConnect: () -> Unit, onSaveCookie: (String) -> Unit,
 ) {
     val focusManager = LocalFocusManager.current
     val isConnected  = wsState is WsState.Connected
     val isBusy       = wsState is WsState.Connecting || autoConnecting
     val shape        = RoundedCornerShape(20.dp)
     val rs = rememberResponsiveSize()
+
+    // cookie 输入框本地状态（与持久化值保持同步，失焦时自动保存）
+    var cookieInput by remember(cookie) { mutableStateOf(cookie) }
+    // 控制 cookie 区域是否展开
+    var cookieExpanded by remember { mutableStateOf(cookie.isNotEmpty()) }
 
     Column(
         modifier = Modifier
@@ -252,6 +265,145 @@ private fun ConnectionCard(
             leadingIcon = { Icon(Icons.Default.Wifi, null,
                 tint = if (isConnected) CpuGreen else TextMuted, modifier = Modifier.size(rs.iconSize(base = 18.dp))) }
         )
+
+        // ── Cookie 区域 ─────────────────────────────────────────────────────
+        Column(modifier = Modifier.fillMaxWidth()) {
+            // 展开/折叠 触发行
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable { cookieExpanded = !cookieExpanded }
+                    .padding(horizontal = 4.dp, vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(rs.itemSpacing(base = 6.dp))
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Cookie,
+                        contentDescription = "Cookie",
+                        tint = if (cookie.isNotEmpty()) NeonBlue else TextMuted,
+                        modifier = Modifier.size(rs.iconSize(base = 14.dp))
+                    )
+                    Text(
+                        text = if (cookie.isNotEmpty()) "COOKIE  (已设置)" else "COOKIE  (可选)",
+                        color = if (cookie.isNotEmpty()) NeonBlue else TextMuted,
+                        fontSize = rs.smallFontSize(),
+                        fontWeight = FontWeight.SemiBold,
+                        fontFamily = FontFamily.Monospace,
+                        letterSpacing = 1.sp
+                    )
+                }
+                Icon(
+                    imageVector = if (cookieExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    contentDescription = null,
+                    tint = TextMuted,
+                    modifier = Modifier.size(rs.iconSize(base = 16.dp))
+                )
+            }
+
+            // 展开内容：输入框 + 保存/清除按钮
+            AnimatedVisibility(visible = cookieExpanded) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = rs.itemSpacing(base = 6.dp)),
+                    verticalArrangement = Arrangement.spacedBy(rs.itemSpacing(base = 6.dp))
+                ) {
+                    OutlinedTextField(
+                        value = cookieInput,
+                        onValueChange = { cookieInput = it },
+                        placeholder = {
+                            Text(
+                                "key1=value1; key2=value2",
+                                color = TextMuted,
+                                fontSize = rs.labelFontSize(base = 11f),
+                                fontFamily = FontFamily.Monospace
+                            )
+                        },
+                        singleLine = false,
+                        maxLines = 3,
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = KeyboardType.Text,
+                            imeAction = ImeAction.Done
+                        ),
+                        keyboardActions = KeyboardActions(onDone = {
+                            onSaveCookie(cookieInput)
+                            focusManager.clearFocus()
+                        }),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor   = NeonBlue,
+                            unfocusedBorderColor = BorderColor,
+                            focusedTextColor     = TextPrimary,
+                            unfocusedTextColor   = TextPrimary,
+                            cursorColor          = NeonBlue,
+                        ),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                        textStyle = LocalTextStyle.current.copy(
+                            fontFamily = FontFamily.Monospace,
+                            fontSize   = rs.labelFontSize(base = 11f)
+                        ),
+                        leadingIcon = {
+                            Icon(
+                                Icons.Default.VpnKey, null,
+                                tint = TextMuted,
+                                modifier = Modifier.size(rs.iconSize(base = 16.dp))
+                            )
+                        }
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(rs.itemSpacing(base = 8.dp))
+                    ) {
+                        // 保存按钮
+                        Button(
+                            onClick = {
+                                onSaveCookie(cookieInput)
+                                focusManager.clearFocus()
+                            },
+                            modifier = Modifier.weight(1f).height(rs.buttonHeight(base = 36.dp)),
+                            shape = RoundedCornerShape(10.dp),
+                            contentPadding = PaddingValues(horizontal = rs.itemSpacing(), vertical = 0.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = NeonBlueFade,
+                                contentColor   = NeonBlue,
+                            ),
+                            border = BorderStroke(1.dp, NeonBlue.copy(alpha = 0.5f))
+                        ) {
+                            Icon(Icons.Default.Save, null, modifier = Modifier.size(rs.iconSize(base = 14.dp)))
+                            Spacer(Modifier.width(4.dp))
+                            Text("SAVE", fontFamily = FontFamily.Monospace, fontSize = rs.smallFontSize())
+                        }
+                        // 清除按钮
+                        Button(
+                            onClick = {
+                                cookieInput = ""
+                                onSaveCookie("")
+                                focusManager.clearFocus()
+                            },
+                            modifier = Modifier.weight(1f).height(rs.buttonHeight(base = 36.dp)),
+                            shape = RoundedCornerShape(10.dp),
+                            contentPadding = PaddingValues(horizontal = rs.itemSpacing(), vertical = 0.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = DangerRed.copy(alpha = 0.12f),
+                                contentColor   = DangerRed,
+                            ),
+                            border = BorderStroke(1.dp, DangerRed.copy(alpha = 0.4f))
+                        ) {
+                            Icon(Icons.Default.DeleteOutline, null, modifier = Modifier.size(rs.iconSize(base = 14.dp)))
+                            Spacer(Modifier.width(4.dp))
+                            Text("CLEAR", fontFamily = FontFamily.Monospace, fontSize = rs.smallFontSize())
+                        }
+                    }
+                }
+            }
+        }
+        // ── Cookie 区域 END ─────────────────────────────────────────────────
 
         if (wsState is WsState.Error) {
             Text("⚠ ${wsState.message}", color = DangerRed, fontSize = rs.smallFontSize(), fontFamily = FontFamily.Monospace)
@@ -563,8 +715,8 @@ private fun ChartPage(
                     }
                 )
             }
-            .padding(horizontal = rs.cardSpacing(base = 10.dp), vertical = rs.cardSpacing(base = 8.dp)),
-        horizontalArrangement = Arrangement.spacedBy(rs.cardSpacing())
+            .padding(horizontal = rs.cardSpacing(base = 3.dp), vertical = rs.cardSpacing(base = 3.dp)),
+        horizontalArrangement = Arrangement.spacedBy(rs.cardSpacing(base = 3.dp))
     ) {
         // 列1：网速图（含顶部 Header 行）
         NetworkCard(
@@ -580,7 +732,7 @@ private fun ChartPage(
         // 列2：CPU（上）+ MEM（下）—— 始终不变
         Column(
             modifier = Modifier.weight(3f).fillMaxHeight(),
-            verticalArrangement = Arrangement.spacedBy(rs.cardSpacing())
+            verticalArrangement = Arrangement.spacedBy(rs.cardSpacing(base = 3.dp))
         ) {
             CpuCard(
                 value    = metrics?.cpuUsagePercent ?: 0f,
@@ -593,7 +745,7 @@ private fun ChartPage(
                 usedMb   = metrics?.memoryUsedMb ?: 0L,
                 totalMb  = metrics?.memoryTotalMb ?: 0L,
                 fontSize = rs.bigFontSize(),
-                modifier = Modifier.fillMaxWidth().weight(1f)
+                modifier = Modifier.fillMaxWidth().weight(0.38f)
             )
         }
 
@@ -674,10 +826,10 @@ private fun NetworkCard(
 
             Spacer(Modifier.weight(1f))
 
-            // 图例
+            // 图例（颜色与 DualLineChart 保持一致：RX 蓝紫，TX 橙）
             Row(horizontalArrangement = Arrangement.spacedBy(rs.itemSpacing(base = 10.dp))) {
-                LegendItem(color = NetAmber, label = "RX", arrow = "↓")
-                LegendItem(color = NetPink,  label = "TX", arrow = "↑")
+                LegendItem(color = Color(0xFF7B7FEB), label = "RX", arrow = "↓")
+                LegendItem(color = Color(0xFFFF9C3E), label = "TX", arrow = "↑")
             }
         }
 
@@ -719,30 +871,39 @@ private fun CpuCard(
     fontSize: androidx.compose.ui.unit.TextUnit? = null,
     modifier: Modifier = Modifier,
 ) {
-    val rs = rememberResponsiveSize()
-    val actualFontSize = fontSize ?: rs.bigFontSize()
-    GlassCard(modifier = modifier, accentColor = CpuGreen, glowAlignment = GlowAlignment.TopLeft) {
-        Row(modifier = Modifier.fillMaxSize()) {
-            VerticalLabel(label = "CPU", color = CpuGreen)
-            BoxWithConstraints(
-                modifier = Modifier.weight(1f).fillMaxHeight(),
-                contentAlignment = Alignment.Center
-            ) {
-                val gaugeSize = minOf(maxWidth, maxHeight)
-                Box(modifier = Modifier.size(gaugeSize), contentAlignment = Alignment.Center) {
-                    GaugeChart(
-                        value            = value,
-                        color            = CpuGreen,
-                        glowColor        = CpuGreenFade,
-                        gradientEndColor = CpuCyan,
-                        modifier         = Modifier.fillMaxSize()
-                    )
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(text = "${value.roundToInt()}", color = CpuGreen,
-                            fontSize = actualFontSize, fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace, lineHeight = actualFontSize)
-                    }
-                }
+    // CPU 卡片：速度计仪表盘，内边距压到最小让表盘充满格子
+    GlassCard(
+        modifier = modifier,
+        accentColor = CpuGreen,
+        glowAlignment = GlowAlignment.TopLeft,
+        contentPadding = 2.dp
+    ) {
+        BoxWithConstraints(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            // 用 maxWidth 撑满卡片宽度，避免在矩形卡片中留大块空白
+            val gaugeSize = maxWidth
+            // 字体大小 = 表盘尺寸的 16%，自动跟随卡片尺寸缩放
+            val dynamicFontSize = (gaugeSize.value * 0.16f).sp
+            Box(modifier = Modifier.size(gaugeSize), contentAlignment = Alignment.Center) {
+                SpeedometerGauge(
+                    value            = value,
+                    color            = Color(0xFF3D6DEB),
+                    glowColor        = Color(0x33EF5350),
+                    gradientEndColor = Color(0xFFEC407A),
+                    modifier         = Modifier.fillMaxSize()
+                )
+                // 数字放在表盘下半部分中心
+                Text(
+                    text = "${value.roundToInt()}",
+                    color = TextPrimary,
+                    fontSize = dynamicFontSize,
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = FontFamily.Monospace,
+                    lineHeight = dynamicFontSize,
+                    modifier = Modifier.offset(y = gaugeSize * 0.22f)
+                )
             }
         }
     }
@@ -850,45 +1011,40 @@ private fun MemCard(
     modifier: Modifier = Modifier,
 ) {
     val rs = rememberResponsiveSize()
-    val actualFontSize = fontSize ?: rs.bigFontSize()
-    GlassCard(modifier = modifier, accentColor = MemPurple, glowAlignment = GlowAlignment.TopRight) {
-        Row(modifier = Modifier.fillMaxSize()) {
-            VerticalLabel(label = "MEM", color = MemPurple)
-            Column(
-                modifier = Modifier.weight(1f).fillMaxHeight(),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                BoxWithConstraints(
-                    modifier = Modifier.fillMaxWidth().weight(1f),
-                    contentAlignment = Alignment.Center
+    // 去掉圆形图表和标题，只保留：xx/xx 文字（进度条上方）+ 新样式进度条
+    GlassCard(
+        modifier = modifier,
+        accentColor = MemPurple,
+        glowAlignment = GlowAlignment.TopRight,
+        contentPadding = 8.dp
+    ) {
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.Center
+        ) {
+            // xx/xx 文字放在进度条上方
+            if (totalMb > 0) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    val gaugeSize = minOf(maxWidth, maxHeight)
-                    Box(modifier = Modifier.size(gaugeSize), contentAlignment = Alignment.Center) {
-                        GaugeChart(
-                            value            = value,
-                            color            = MemPurple,
-                            glowColor        = MemPurpleFade,
-                            gradientEndColor = MemPink,
-                            modifier         = Modifier.fillMaxSize()
-                        )
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text(text = "${value.roundToInt()}", color = MemPurple,
-                                fontSize = actualFontSize, fontWeight = FontWeight.Bold,
-                                fontFamily = FontFamily.Monospace, lineHeight = actualFontSize)
-                        }
-                    }
-                }
-                if (totalMb > 0) {
                     Text(
                         text = "${formatMb(usedMb)} / ${formatMb(totalMb)}",
-                        color = TextSecondary, fontSize = rs.labelFontSize(base = 11f),
-                        fontFamily = FontFamily.Monospace, textAlign = TextAlign.Center,
-                        modifier = Modifier.fillMaxWidth()
+                        color = TextSecondary,
+                        fontSize = rs.labelFontSize(base = 11f),
+                        fontFamily = FontFamily.Monospace
                     )
-                    Spacer(Modifier.height(rs.itemSpacing(base = 4.dp)))
+                    Text(
+                        text = "${value.roundToInt()}%",
+                        color = MemPurple,
+                        fontSize = rs.labelFontSize(base = 11f),
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace
+                    )
                 }
-                MemProgressBar(percent = value, modifier = Modifier.fillMaxWidth())
             }
+            MemProgressBar(percent = value, modifier = Modifier.fillMaxWidth())
         }
     }
 }
@@ -921,56 +1077,53 @@ private fun CoresCard(cores: List<Float>, modifier: Modifier = Modifier) {
         }
         Spacer(Modifier.height(rs.itemSpacing()))
 
+        // 根据核心数动态计算进度条高度：核心越少越粗
+        val barH: Dp = when {
+            cores.size <= 4  -> (22 * rs.scaleFactor).dp
+            cores.size <= 8  -> (16 * rs.scaleFactor).dp
+            cores.size <= 14 -> (12 * rs.scaleFactor).dp
+            else             -> (9  * rs.scaleFactor).dp
+        }
+
         if (useGridMode) {
-            // ── 超过 14 核：多列网格，去掉 Cx 标签，每行 2 列 ──────────────────
+            // ── 超过 14 核：多列网格，每行 2 列────────────────────────────
             Column(
                 modifier = Modifier.fillMaxWidth().weight(1f),
-                verticalArrangement = Arrangement.SpaceEvenly
+                verticalArrangement = Arrangement.spacedBy(rs.itemSpacing(base = 3.dp))
             ) {
                 val chunked = cores.chunked(2)
-                chunked.forEach { rowCores ->
+                chunked.forEachIndexed { rowIdx, rowCores ->
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(4.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        rowCores.forEachIndexed { _, v ->
-                            Box(modifier = Modifier.weight(1f).height((14 * rs.scaleFactor).dp)) {
-                                CoreBarChart(coreValues = listOf(v), modifier = Modifier.fillMaxSize())
+                        rowCores.forEachIndexed { colIdx, v ->
+                            val coreIdx = rowIdx * 2 + colIdx
+                            Box(modifier = Modifier.weight(1f).height(barH)) {
+                                CoreBarChart(
+                                    value     = v,
+                                    coreIndex = coreIdx,
+                                    modifier  = Modifier.fillMaxSize()
+                                )
                             }
                         }
-                        if (rowCores.size == 1) {
-                            Spacer(modifier = Modifier.weight(1f))
-                        }
+                        if (rowCores.size == 1) Spacer(modifier = Modifier.weight(1f))
                     }
                 }
             }
         } else {
-            // ── ≤ 14 核：保持现有样式（Cx 标签 + 进度条 + 百分比）───────────────
+            // ── ≤ 14 核：只保留进度条，铺满宽度 ─────────────────────────────
             Column(
                 modifier = Modifier.fillMaxWidth().weight(1f),
-                verticalArrangement = Arrangement.SpaceEvenly
+                verticalArrangement = Arrangement.spacedBy(rs.itemSpacing(base = 3.dp))
             ) {
                 cores.forEachIndexed { i, v ->
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(rs.itemSpacing())
-                    ) {
-                        Text(text = "C$i", color = TextSecondary, fontSize = rs.smallFontSize(base = 9f),
-                            fontFamily = FontFamily.Monospace, modifier = Modifier.width((18 * rs.widthScale).dp))
-                        Box(modifier = Modifier.weight(1f).height((18 * rs.scaleFactor).dp)) {
-                            CoreBarChart(coreValues = listOf(v), modifier = Modifier.fillMaxSize())
-                        }
-                        Text(
-                            text = "${v.roundToInt()}%",
-                            color = when {
-                                v > 50f -> CoreAmber
-                                v > 20f -> CoreBlue
-                                else    -> TextSecondary
-                            },
-                            fontSize = rs.smallFontSize(base = 9f), fontFamily = FontFamily.Monospace,
-                            modifier = Modifier.width((26 * rs.widthScale).dp)
+                    Box(modifier = Modifier.fillMaxWidth().height(barH)) {
+                        CoreBarChart(
+                            value     = v,
+                            coreIndex = i,
+                            modifier  = Modifier.fillMaxSize()
                         )
                     }
                 }

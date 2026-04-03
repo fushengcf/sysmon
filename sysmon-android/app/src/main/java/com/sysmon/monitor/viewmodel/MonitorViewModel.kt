@@ -54,6 +54,9 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
     val savedUrls: StateFlow<List<String>>    = urlRepo.urls
     val savedRemarks: StateFlow<List<String>> = urlRepo.remarks
 
+    // cookie：全局 WebSocket 握手时附加，持久化在 UrlRepository
+    val cookie: StateFlow<String> = urlRepo.cookie
+
     // autoConnecting：Connecting 状态时为 true，供 UI 显示"连接中"
     private val _autoConnecting = MutableStateFlow(false)
     val autoConnecting: StateFlow<Boolean> = _autoConnecting.asStateFlow()
@@ -102,7 +105,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
     /** 用户手动点击连接 */
     fun connect() {
         val url = _wsUrl.value
-        sendToService(SysMonForegroundService.ACTION_CONNECT, url)
+        sendToService(SysMonForegroundService.ACTION_CONNECT, url, urlRepo.cookie.value)
     }
 
     /** 用户手动断开，不再自动重连 */
@@ -121,8 +124,11 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         _wsUrl.value = url
         _connectedUrl.value = url
         clearHistory()
-        sendToService(SysMonForegroundService.ACTION_RECONNECT, url)
+        sendToService(SysMonForegroundService.ACTION_RECONNECT, url, urlRepo.cookie.value)
     }
+
+    /** 保存/更新 Cookie */
+    fun saveCookie(cookie: String) { urlRepo.saveCookie(cookie) }
 
     /**
      * onResume 时调用。
@@ -184,11 +190,12 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    private fun sendToService(action: String, url: String?) {
+    private fun sendToService(action: String, url: String?, cookie: String = "") {
         val ctx = getApplication<Application>()
         val intent = Intent(ctx, SysMonForegroundService::class.java).apply {
             this.action = action
             url?.let { putExtra(SysMonForegroundService.EXTRA_URL, it) }
+            if (cookie.isNotEmpty()) putExtra(SysMonForegroundService.EXTRA_COOKIE, cookie)
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             ctx.startForegroundService(intent)

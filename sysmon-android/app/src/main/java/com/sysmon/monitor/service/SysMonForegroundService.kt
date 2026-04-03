@@ -52,7 +52,8 @@ class SysMonForegroundService : Service() {
         const val ACTION_SCREEN_OFF = "com.sysmon.monitor.SCREEN_OFF"
         const val ACTION_SCREEN_ON  = "com.sysmon.monitor.SCREEN_ON"
 
-        const val EXTRA_URL = "url"
+        const val EXTRA_URL    = "url"
+        const val EXTRA_COOKIE = "cookie"
 
         private const val CONNECT_TIMEOUT    = 2_000L
         private const val RECONNECT_INTERVAL = 30_000L
@@ -149,7 +150,8 @@ class SysMonForegroundService : Service() {
                 return START_NOT_STICKY
             }
             ACTION_CONNECT -> {
-                val url = intent.getStringExtra(EXTRA_URL) ?: return START_STICKY
+                val url    = intent.getStringExtra(EXTRA_URL)    ?: return START_STICKY
+                val cookie = intent.getStringExtra(EXTRA_COOKIE) ?: ""
                 manuallyDisconnected.set(false)
                 reconnectJob?.cancel()
                 isScreenOff.set(false)
@@ -157,14 +159,15 @@ class SysMonForegroundService : Service() {
                 // reconnect() 不触发 onClosed/Disconnected 回调，
                 // 不会提前消费掉 isManualConnect 标志
                 isManualConnect.set(true)
-                wsClient.reconnect(url)
+                wsClient.reconnect(url, cookie)
             }
             ACTION_RECONNECT -> {
                 // 用户主动切换 URL：静默换连，不触发断线逻辑
-                val url = intent.getStringExtra(EXTRA_URL) ?: return START_STICKY
+                val url    = intent.getStringExtra(EXTRA_URL)    ?: return START_STICKY
+                val cookie = intent.getStringExtra(EXTRA_COOKIE) ?: ""
                 manuallyDisconnected.set(false)
                 reconnectJob?.cancel()
-                wsClient.reconnect(url)
+                wsClient.reconnect(url, cookie)
             }
             ACTION_DISCONNECT -> {
                 manuallyDisconnected.set(true)
@@ -225,13 +228,15 @@ class SysMonForegroundService : Service() {
                 val roundStart = System.currentTimeMillis()
                 val currentUrls = urlRepo.urls.value
                 if (currentUrls.isEmpty()) break
+                // 每轮重连时读取最新 cookie
+                val currentCookie = urlRepo.cookie.value
 
                 for (url in currentUrls) {
                     if (manuallyDisconnected.get()) break@outer
                     if (wsClient.state.value is WsState.Connected) break@outer
 
-                    Log.d(TAG, "尝试连接: $url")
-                    wsClient.connect(url)
+                    Log.d(TAG, "尝试连接: $url cookie=${currentCookie.isNotEmpty()}")
+                    wsClient.connect(url, currentCookie)
 
                     val deadline = System.currentTimeMillis() + CONNECT_TIMEOUT
                     while (System.currentTimeMillis() < deadline) {

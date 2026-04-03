@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.asStateFlow
  *   "url_count"   — 数量
  *   "url_0" ~ "url_9"    — 链接
  *   "remark_0" ~ "remark_9" — 对应备注（可为空）
+ *   "cookie"      — 全局 Cookie 字符串（发起 WS 握手时附加到请求头）
  */
 class UrlRepository(context: Context) {
 
@@ -20,6 +21,7 @@ class UrlRepository(context: Context) {
         private const val KEY_COUNT     = "url_count"
         private const val KEY_PREFIX    = "url_"
         private const val REMARK_PREFIX = "remark_"
+        private const val KEY_COOKIE    = "cookie"
         const val MAX_URLS = 10
     }
 
@@ -32,6 +34,10 @@ class UrlRepository(context: Context) {
     // remarks 与 urls 一一对应，空字符串表示无备注
     private val _remarks = MutableStateFlow<List<String>>(loadAllRemarks())
     val remarks: StateFlow<List<String>> = _remarks.asStateFlow()
+
+    // 全局 Cookie（所有连接共用），空字符串表示不附加
+    private val _cookie = MutableStateFlow(prefs.getString(KEY_COOKIE, "") ?: "")
+    val cookie: StateFlow<String> = _cookie.asStateFlow()
 
     // ── 读取 ──────────────────────────────────────────────────────────────────
 
@@ -113,6 +119,15 @@ class UrlRepository(context: Context) {
         currentRemarks[idx] = remark.trim()
         persist(currentUrls, currentRemarks)
         _remarks.value = currentRemarks
+    }
+
+    /**
+     * 保存/更新全局 Cookie。
+     */
+    fun saveCookie(cookie: String) {
+        val trimmed = cookie.trim()
+        prefs.edit().putString(KEY_COOKIE, trimmed).apply()
+        _cookie.value = trimmed
     }
 
     // ── 持久化 ────────────────────────────────────────────────────────────────

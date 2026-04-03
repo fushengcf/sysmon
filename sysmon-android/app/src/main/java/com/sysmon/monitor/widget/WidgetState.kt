@@ -5,6 +5,7 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
+import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.glance.state.GlanceStateDefinition
 import androidx.glance.state.PreferencesGlanceStateDefinition
 import java.io.File
@@ -29,5 +30,8 @@ object WidgetStateKeys {
     val MEM_PERCENT   = floatPreferencesKey("mem_percent")
     val MEM_USED_MB   = longPreferencesKey("mem_used_mb")
     val MEM_TOTAL_MB  = longPreferencesKey("mem_total_mb")
-    val CONNECTED     = booleanPreferencesKey("connected")
+    val CONNECTED          = booleanPreferencesKey("connected")
+    /** 网速历史：最近 N 个 KB/s 值，JSON 数组字符串，如 "[12.3,45.6,...]" */
+    val NET_RX_HISTORY      = stringPreferencesKey("net_rx_history")
+    val NET_TX_HISTORY      = stringPreferencesKey("net_tx_history")
 }

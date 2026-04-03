@@ -29,8 +29,14 @@ import java.util.concurrent.atomic.AtomicLong
 class SysMonWebSocket(private val context: Context? = null) {
 
     companion object {
-        private const val TAG = "SysMonWS"
+        private const val TAG       = "SysMonWS"
+        /** 网速历史最大保留条数 */
+        private const val MAX_HIST  = 30
     }
+
+    // 网速历史（内存维护）
+    private val rxHistory = ArrayDeque<Float>(MAX_HIST)
+    private val txHistory = ArrayDeque<Float>(MAX_HIST)
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(5, TimeUnit.SECONDS)
@@ -56,28 +62,45 @@ class SysMonWebSocket(private val context: Context? = null) {
     /**
      * 切换连接：静默关闭旧 WebSocket（不触发 onClosed/_state 变化），直接发起新连接。
      * 用于用户主动切换 URL，避免触发断线熄屏逻辑。
+     * @param url    目标 WebSocket 地址
+     * @param cookie 可选 Cookie 字符串（格式："key1=value1; key2=value2"），为空时不附加
      */
-    fun reconnect(url: String) {
+    fun reconnect(url: String, cookie: String = "") {
         // 先递增 generation，令所有旧 Listener 的回调自动失效
         val gen = generation.incrementAndGet()
-        Log.d(TAG, "reconnect() gen=$gen url=$url")
+        Log.d(TAG, "reconnect() gen=$gen url=$url cookie=${cookie.isNotEmpty()}")
         // cancel() 直接终止连接，不触发 onClosed
         webSocket?.cancel()
         webSocket = null
         _metrics.value = null
         // 状态设为 Connecting，跳过 connect() 里的守卫
         _state.value = WsState.Connecting
-        val request = Request.Builder().url(url).build()
+        val request = buildRequest(url, cookie)
         webSocket = client.newWebSocket(request, makeListener(gen))
     }
 
-    fun connect(url: String) {
+    /**
+     * @param url    目标 WebSocket 地址
+     * @param cookie 可选 Cookie 字符串（格式："key1=value1; key2=value2"），为空时不附加
+     */
+    fun connect(url: String, cookie: String = "") {
         if (_state.value is WsState.Connected || _state.value is WsState.Connecting) return
         val gen = generation.incrementAndGet()
-        Log.d(TAG, "connect() gen=$gen url=$url")
+        Log.d(TAG, "connect() gen=$gen url=$url cookie=${cookie.isNotEmpty()}")
         _state.value = WsState.Connecting
-        val request = Request.Builder().url(url).build()
+        val request = buildRequest(url, cookie)
         webSocket = client.newWebSocket(request, makeListener(gen))
+    }
+
+    /**
+     * 构建 WebSocket 握手请求，若 cookie 不为空则附加到 Cookie 请求头。
+     */
+    private fun buildRequest(url: String, cookie: String): Request {
+        val builder = Request.Builder().url(url)
+        if (cookie.isNotBlank()) {
+            builder.addHeader("Cookie", cookie)
+        }
+        return builder.build()
     }
 
     /**
@@ -101,15 +124,25 @@ class SysMonWebSocket(private val context: Context? = null) {
             try {
                 val m = gson.fromJson(text, SystemMetrics::class.java)
                 _metrics.value = m
+                // 更新内存中的历史队列
+                if (rxHistory.size >= MAX_HIST) rxHistory.removeFirst()
+                if (txHistory.size >= MAX_HIST) txHistory.removeFirst()
+                rxHistory.addLast(m.netRxKbps.toFloat())
+                txHistory.addLast(m.netTxKbps.toFloat())
+                // 序列化为 JSON 字符串
+                val rxJson = gson.toJson(rxHistory.toList())
+                val txJson = gson.toJson(txHistory.toList())
                 // 写入 Glance DataStore → 自动触发小组件重组
                 updateWidgetState { prefs ->
-                    prefs[WidgetStateKeys.NET_RX_KBPS]  = m.netRxKbps.toFloat()
-                    prefs[WidgetStateKeys.NET_TX_KBPS]  = m.netTxKbps.toFloat()
-                    prefs[WidgetStateKeys.CPU_PERCENT]  = m.cpuUsagePercent
-                    prefs[WidgetStateKeys.MEM_PERCENT]  = m.memoryUsagePercent
-                    prefs[WidgetStateKeys.MEM_USED_MB]  = m.memoryUsedMb
-                    prefs[WidgetStateKeys.MEM_TOTAL_MB] = m.memoryTotalMb
-                    prefs[WidgetStateKeys.CONNECTED]    = true
+                    prefs[WidgetStateKeys.NET_RX_KBPS]    = m.netRxKbps.toFloat()
+                    prefs[WidgetStateKeys.NET_TX_KBPS]    = m.netTxKbps.toFloat()
+                    prefs[WidgetStateKeys.NET_RX_HISTORY] = rxJson
+                    prefs[WidgetStateKeys.NET_TX_HISTORY] = txJson
+                    prefs[WidgetStateKeys.CPU_PERCENT]    = m.cpuUsagePercent
+                    prefs[WidgetStateKeys.MEM_PERCENT]    = m.memoryUsagePercent
+                    prefs[WidgetStateKeys.MEM_USED_MB]    = m.memoryUsedMb
+                    prefs[WidgetStateKeys.MEM_TOTAL_MB]   = m.memoryTotalMb
+                    prefs[WidgetStateKeys.CONNECTED]      = true
                 }
             } catch (_: Exception) { /* 忽略解析错误 */ }
         }

@@ -1,13 +1,15 @@
 package com.sysmon.monitor.widget
 
 import android.content.Context
+import android.graphics.Bitmap
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.datastore.preferences.core.Preferences
 import androidx.glance.GlanceId
 import androidx.glance.GlanceModifier
+import androidx.glance.Image
+import androidx.glance.ImageProvider
 import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.GlanceAppWidgetReceiver
 import androidx.glance.appwidget.provideContent
@@ -15,13 +17,10 @@ import androidx.glance.background
 import androidx.glance.currentState
 import androidx.glance.layout.*
 import androidx.glance.state.GlanceStateDefinition
-import androidx.glance.text.FontWeight
-import androidx.glance.text.Text
-import androidx.glance.text.TextStyle
 import androidx.glance.unit.ColorProvider
 import kotlin.math.roundToInt
 
-// ─── CPU 使用率小组件 ─────────────────────────────────────────────────────────
+// ─── CPU 使用率小组件（速度计仪表盘样式） ────────────────────────────────────
 
 class CpuWidget : GlanceAppWidget() {
 
@@ -33,63 +32,32 @@ class CpuWidget : GlanceAppWidget() {
             val cpu       = prefs[WidgetStateKeys.CPU_PERCENT] ?: 0f
             val connected = prefs[WidgetStateKeys.CONNECTED] ?: false
 
-            CpuContent(cpu = cpu, connected = connected)
+            CpuContent(context = context, cpu = cpu, connected = connected)
         }
     }
 }
 
 @Composable
-private fun CpuContent(cpu: Float, connected: Boolean) {
-    val bgColor     = ColorProvider(Color(0xEE0F1623))
-    val accentColor = ColorProvider(Color(0xFF00FFB3))
-    val mutedColor  = ColorProvider(Color(0xFF3D5A7A))
+private fun CpuContent(context: Context, cpu: Float, connected: Boolean) {
+    // 仪表盘 Bitmap 尺寸：240px 保证清晰度
+    val bitmapSize = 240
+    val displayValue = if (connected) cpu else 0f
+    val gaugeBitmap: Bitmap = SpeedometerBitmapDrawer.draw(bitmapSize, displayValue)
 
-    val valueColor = when {
-        !connected -> mutedColor
-        cpu < 40f  -> ColorProvider(Color(0xFF00FFB3))
-        cpu < 70f  -> ColorProvider(Color(0xFF00D4FF))
-        cpu < 90f  -> ColorProvider(Color(0xFFFF9500))
-        else       -> ColorProvider(Color(0xFFFF453A))
-    }
-
-    Column(
+    // 背景透明，仪表盘图片铺满，不叠加任何文案
+    Box(
         modifier = GlanceModifier
             .fillMaxSize()
-            .background(bgColor)
-            .padding(10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalAlignment = Alignment.CenterHorizontally
+            .background(ColorProvider(Color(0x00000000))),  // 完全透明
+        contentAlignment = Alignment.Center
     ) {
-        Row(
-            modifier = GlanceModifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text("CPU", style = TextStyle(color = accentColor, fontSize = 10.sp, fontWeight = FontWeight.Bold))
-            Spacer(GlanceModifier.defaultWeight())
-            Text(
-                text = if (connected) "●" else "○",
-                style = TextStyle(color = if (connected) accentColor else mutedColor, fontSize = 8.sp)
-            )
-        }
-
-        Spacer(GlanceModifier.height(8.dp))
-
-        if (connected) {
-            Text(
-                "${cpu.roundToInt()}",
-                style = TextStyle(color = valueColor, fontSize = 36.sp, fontWeight = FontWeight.Bold)
-            )
-
-            Spacer(GlanceModifier.height(4.dp))
-
-            val filled = (cpu / 100f * 10).roundToInt().coerceIn(0, 10)
-            Text(
-                text = "█".repeat(filled) + "░".repeat(10 - filled),
-                style = TextStyle(color = valueColor, fontSize = 9.sp)
-            )
-        } else {
-            Text("未连接", style = TextStyle(color = mutedColor, fontSize = 12.sp))
-        }
+        Image(
+            provider           = ImageProvider(gaugeBitmap),
+            contentDescription = "CPU ${cpu.roundToInt()}%",
+            modifier           = GlanceModifier
+                .fillMaxSize()
+                .padding(2.dp)
+        )
     }
 }
 
