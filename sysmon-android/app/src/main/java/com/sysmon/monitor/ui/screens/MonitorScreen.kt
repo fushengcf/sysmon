@@ -1,7 +1,13 @@
 package com.sysmon.monitor.ui.screens
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.ui.geometry.CornerRadius
@@ -25,6 +31,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
@@ -43,12 +50,18 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.sysmon.monitor.data.model.SystemMetrics
 import com.sysmon.monitor.data.websocket.WsState
 import com.sysmon.monitor.ui.components.*
+import com.sysmon.monitor.ui.screens.cam.CamCameraScreen
+import com.sysmon.monitor.ui.screens.cam.CamPlayerScreen
+import com.sysmon.monitor.ui.screens.cam.CamSettingsScreen
 import com.sysmon.monitor.ui.theme.*
+import com.sysmon.monitor.viewmodel.CameraViewModel
+import com.sysmon.monitor.viewmodel.CamPlayerViewModel
 import com.sysmon.monitor.viewmodel.MonitorViewModel
+import com.sysmon.monitor.viewmodel.StreamState
 import kotlin.math.roundToInt
 
 // ─── 页面枚举 ─────────────────────────────────────────────────────────────────
-private enum class Page { CONNECT, CHART }
+private enum class Page { CONNECT, CHART, CAM_CAMERA, CAM_PLAYER, CAM_SETTINGS }
 
 // ══════════════════════════════════════════════════════════════════════════════
 // 根 Screen
@@ -69,11 +82,31 @@ fun MonitorScreen(vm: MonitorViewModel = viewModel()) {
     val connectedUrl   by vm.connectedUrl.collectAsStateWithLifecycle()
     val cookie         by vm.cookie.collectAsStateWithLifecycle()
 
+    // Camera ViewModel（推流页和设置页共享同一个实例）
+    val camVm: CameraViewModel = viewModel()
+    // Player ViewModel（播放页独立实例）
+    val camPlayerVm: CamPlayerViewModel = viewModel()
+
+    val camStreamState by camVm.streamState.collectAsStateWithLifecycle()
+
     LaunchedEffect(wsState) {
         if (wsState is WsState.Connected) vm.saveCurrentUrl()
     }
 
-    val currentPage = if (wsState is WsState.Connected) Page.CHART else Page.CONNECT
+    // ── 手动管理的 camPage 堆栈，null 表示不在 cam 子页面 ──
+    var camPage by remember { mutableStateOf<Page?>(null) }
+
+    // 最终当前页：cam 子页面优先，否则由 wsState 决定
+    val currentPage = camPage
+        ?: if (wsState is WsState.Connected) Page.CHART else Page.CONNECT
+
+    // ── 侧滑返回 / 系统返回键支持 ──
+    BackHandler(enabled = camPage != null) {
+        camPage = when (camPage) {
+            Page.CAM_SETTINGS -> Page.CAM_CAMERA   // 设置页 → 推流页
+            else              -> null               // 其他 cam 页 → 回 ConnectPage
+        }
+    }
 
     val rs = rememberResponsiveSize()
 
@@ -85,12 +118,25 @@ fun MonitorScreen(vm: MonitorViewModel = viewModel()) {
         AnimatedContent(
             targetState = currentPage,
             transitionSpec = {
-                if (targetState == Page.CHART)
-                    (slideInHorizontally(tween(400)) { it } + fadeIn(tween(300)))
-                        .togetherWith(slideOutHorizontally(tween(400)) { -it } + fadeOut(tween(200)))
-                else
-                    (slideInHorizontally(tween(400)) { -it } + fadeIn(tween(300)))
-                        .togetherWith(slideOutHorizontally(tween(400)) { it } + fadeOut(tween(200)))
+                when {
+                    // CAM_CAMERA 切出：用极短淡出（100ms），让 OpenGlView 尽快销毁
+                    // 避免 400ms 过渡动画期间 surfaceDestroyed 被推迟，加剧推流切换时的闪烁
+                    initialState == Page.CAM_CAMERA ->
+                        fadeIn(tween(100)).togetherWith(fadeOut(tween(100)))
+
+                    // 进入 CAM_CAMERA：也用短动画，Surface 快速建立
+                    targetState == Page.CAM_CAMERA ->
+                        fadeIn(tween(150)).togetherWith(fadeOut(tween(100)))
+
+                    // 其他页面之间：保持原有水平滑动动画
+                    targetState.ordinal > initialState.ordinal ->
+                        (slideInHorizontally(tween(400)) { it } + fadeIn(tween(300)))
+                            .togetherWith(slideOutHorizontally(tween(400)) { -it } + fadeOut(tween(200)))
+
+                    else ->
+                        (slideInHorizontally(tween(400)) { -it } + fadeIn(tween(300)))
+                            .togetherWith(slideOutHorizontally(tween(400)) { it } + fadeOut(tween(200)))
+                }
             },
             modifier = Modifier.fillMaxSize(),
             label = "page_transition"
@@ -111,21 +157,37 @@ fun MonitorScreen(vm: MonitorViewModel = viewModel()) {
                     onRemoveUrl        = vm::removeUrl,
                     onSaveRemark       = vm::saveRemark,
                     onSaveCookie       = vm::saveCookie,
+                    onNavigateToCam    = { camPage = it },
                 )
                 Page.CHART -> ChartPage(
-                    wsState      = wsState,
-                    metrics      = metrics,
-                    cpuHistory   = cpuHistory,
-                    memHistory   = memHistory,
-                    netRxHistory = netRxHistory,
-                    netTxHistory = netTxHistory,
-                    connectedUrl = connectedUrl,
-                    savedUrls    = savedUrls,
-                    savedRemarks = savedRemarks,
-                    onDisconnect = vm::disconnect,
-                    onSwipePrev  = vm::switchToPrevUrl,
-                    onSwipeNext  = vm::switchToNextUrl,
-                    rs           = rs,
+                    wsState        = wsState,
+                    metrics        = metrics,
+                    cpuHistory     = cpuHistory,
+                    memHistory     = memHistory,
+                    netRxHistory   = netRxHistory,
+                    netTxHistory   = netTxHistory,
+                    connectedUrl   = connectedUrl,
+                    savedUrls      = savedUrls,
+                    savedRemarks   = savedRemarks,
+                    onDisconnect   = vm::disconnect,
+                    onSwipePrev    = vm::switchToPrevUrl,
+                    onSwipeNext    = vm::switchToNextUrl,
+                    camStreamState = camStreamState,
+                    rs             = rs,
+                )
+                Page.CAM_CAMERA -> CamCameraScreen(
+                    viewModel      = camVm,
+                    onBack         = { camPage = null },
+                    onOpenSettings = { camPage = Page.CAM_SETTINGS },
+                    onOpenPlayer   = { camPage = Page.CAM_PLAYER },
+                )
+                Page.CAM_PLAYER -> CamPlayerScreen(
+                    viewModel = camPlayerVm,
+                    onBack    = { camPage = null },
+                )
+                Page.CAM_SETTINGS -> CamSettingsScreen(
+                    viewModel = camVm,
+                    onBack    = { camPage = Page.CAM_CAMERA },
                 )
             }
         }
@@ -152,6 +214,7 @@ private fun ConnectPage(
     onRemoveUrl: (String) -> Unit,
     onSaveRemark: (String, String) -> Unit,
     onSaveCookie: (String) -> Unit,
+    onNavigateToCam: (Page) -> Unit = {},
 ) {
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(
@@ -180,6 +243,8 @@ private fun ConnectPage(
                     onSaveRemark = onSaveRemark,
                 )
             }
+            // ── CAM 功能入口卡片 ────────────────────────────────────────────
+            CamEntryCard(onNavigate = onNavigateToCam)
             Spacer(Modifier.height(8.dp))
         }
     }
@@ -666,6 +731,7 @@ private fun ChartPage(
     onDisconnect: () -> Unit,
     onSwipePrev: () -> Unit,
     onSwipeNext: () -> Unit,
+    camStreamState: StreamState = StreamState.IDLE,
     rs: ResponsiveSize = ResponsiveSize(393f, 852f, 2f),
 ) {
     // 当前连接的备注
@@ -726,6 +792,7 @@ private fun ChartPage(
             txHistory       = netTxHistory,
             connectedRemark = connectedRemark,
             onDisconnect    = onDisconnect,
+            camStreamState  = camStreamState,
             modifier        = Modifier.weight(5f).fillMaxHeight()
         )
 
@@ -773,6 +840,7 @@ private fun NetworkCard(
     rxHistory: List<Double>, txHistory: List<Double>,
     connectedRemark: String,
     onDisconnect: () -> Unit,
+    camStreamState: StreamState = StreamState.IDLE,
     modifier: Modifier = Modifier,
 ) {
     val rs = rememberResponsiveSize()
@@ -805,6 +873,48 @@ private fun NetworkCard(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
+            }
+
+            // 推流状态胶囊（推流中显示 REC，连接中显示 LINK，其他不显示）
+            val camTagVisible = camStreamState == StreamState.STREAMING || camStreamState == StreamState.CONNECTING
+            if (camTagVisible) {
+                val isStreaming = camStreamState == StreamState.STREAMING
+                val camTagColor = if (isStreaming) DangerRed else WarnOrange
+                val camTagBg = camTagColor.copy(alpha = 0.15f)
+                val camTagText = if (isStreaming) "● REC" else "LINKING"
+
+                val inf = rememberInfiniteTransition(label = "cam_pulse")
+                val pulse by inf.animateFloat(
+                    0.5f, 1f,
+                    infiniteRepeatable(tween(800, easing = LinearEasing), RepeatMode.Reverse),
+                    label = "cp"
+                )
+
+                Row(
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .background(camTagBg)
+                        .border(0.5.dp, camTagColor.copy(alpha = pulse * 0.8f), CircleShape)
+                        .padding(horizontal = rs.itemSpacing(base = 8.dp), vertical = 3.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    if (isStreaming) {
+                        Box(
+                            modifier = Modifier
+                                .size(rs.dotSize(base = 5.dp))
+                                .background(camTagColor.copy(alpha = pulse), CircleShape)
+                        )
+                    }
+                    Text(
+                        text = camTagText,
+                        color = camTagColor,
+                        fontSize = rs.labelFontSize(base = 9f),
+                        fontWeight = FontWeight.SemiBold,
+                        fontFamily = FontFamily.Monospace,
+                        maxLines = 1
+                    )
+                }
             }
 
             // DISC 按钮
@@ -925,36 +1035,33 @@ private fun GpuCard(
     val rs = rememberResponsiveSize()
     val actualFontSize = fontSize ?: rs.bigFontSize()
     GlassCard(modifier = modifier, accentColor = GpuIndigo, glowAlignment = GlowAlignment.TopLeft) {
-        Row(modifier = Modifier.fillMaxSize()) {
-            VerticalLabel(label = "GPU", color = GpuIndigo)
-            Column(
-                modifier = Modifier.weight(1f).fillMaxHeight().padding(vertical = rs.itemSpacing(), horizontal = 4.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
-            ) {
-                // 大字百分比
-                Text(
-                    text = "${value.roundToInt()}",
-                    color = GpuIndigo,
-                    fontSize = actualFontSize,
-                    fontWeight = FontWeight.Bold,
-                    fontFamily = FontFamily.Monospace,
-                    lineHeight = actualFontSize
-                )
+        Column(
+            modifier = Modifier.fillMaxSize().padding(vertical = rs.itemSpacing(), horizontal = 4.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            // 大字百分比
+            Text(
+                text = "${value.roundToInt()}",
+                color = GpuIndigo,
+                fontSize = actualFontSize,
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace,
+                lineHeight = actualFontSize
+            )
 
-                Spacer(Modifier.height(rs.itemSpacing()))
+            Spacer(Modifier.height(rs.itemSpacing()))
 
-                // 竖向分段热力柱（20 格，每格 5%）
-                GpuSegmentBar(
-                    value = value,
-                    modifier = Modifier.fillMaxWidth().weight(1f)
-                )
-            }
+            // 竖向分段热力柱（20 格，每格 5%）
+            GpuSegmentBar(
+                value = value,
+                modifier = Modifier.fillMaxWidth().weight(1f)
+            )
         }
     }
 }
 
-// 竖向分段热力柱：从下往上点亮，颜色从 GpuIndigo → GpuFuchsia 渐变
+// 竖向分段热力柱：从下往上点亮，颜色从 GpuIndigo（底部）→ 红色（顶部）渐变
 @Composable
 private fun GpuSegmentBar(value: Float, modifier: Modifier = Modifier) {
     val animatedValue = remember { Animatable(0f) }
@@ -965,6 +1072,9 @@ private fun GpuSegmentBar(value: Float, modifier: Modifier = Modifier) {
         )
     }
 
+    // 渐变终点：醒目红色
+    val redColor = Color(0xFFFF3B30)
+
     Canvas(modifier = modifier) {
         val totalSegments = 20
         val gapPx = 3f
@@ -974,13 +1084,15 @@ private fun GpuSegmentBar(value: Float, modifier: Modifier = Modifier) {
         val litCount = ((animatedValue.value / 100f) * totalSegments).toInt().coerceIn(0, totalSegments)
 
         for (i in 0 until totalSegments) {
-            // 第 0 格在最底部，第 19 格在最顶部
-            val segIdx = totalSegments - 1 - i   // 从顶到底绘制
+            // 第 0 格在最底部（segIdx=0），第 19 格在最顶部（segIdx=19）
+            // 绘制顺序从顶到底：i=0 时 segIdx=19（顶部），i=19 时 segIdx=0（底部）
+            val segIdx = totalSegments - 1 - i
             val top = i * (segH + gapPx)
-            val lit = segIdx < litCount           // 从底部往上点亮
+            val lit = segIdx < litCount  // 从底部往上点亮
 
-            val progress = if (totalSegments <= 1) 1f else segIdx.toFloat() / (totalSegments - 1)
-            val litColor = lerp(GpuIndigo, GpuFuchsia, progress)
+            // progress：底部=0，顶部=1，越靠顶部颜色越红
+            val progress = if (totalSegments <= 1) 0f else segIdx.toFloat() / (totalSegments - 1)
+            val litColor = lerp(GpuIndigo, redColor, progress)
 
             drawRoundRect(
                 color = if (lit) litColor else BgSlate.copy(alpha = 0.6f),
@@ -1077,54 +1189,75 @@ private fun CoresCard(cores: List<Float>, modifier: Modifier = Modifier) {
         }
         Spacer(Modifier.height(rs.itemSpacing()))
 
-        // 根据核心数动态计算进度条高度：核心越少越粗
-        val barH: Dp = when {
-            cores.size <= 4  -> (22 * rs.scaleFactor).dp
-            cores.size <= 8  -> (16 * rs.scaleFactor).dp
-            cores.size <= 14 -> (12 * rs.scaleFactor).dp
-            else             -> (9  * rs.scaleFactor).dp
-        }
+        // 用 BoxWithConstraints 获取内容区可用高度，再动态计算每条进度条高度
+        BoxWithConstraints(
+            modifier = Modifier.fillMaxWidth().weight(1f)
+        ) {
+            val availableHeight = maxHeight
+            // 间距
+            val gapDp = rs.itemSpacing(base = 3.dp)
 
-        if (useGridMode) {
-            // ── 超过 14 核：多列网格，每行 2 列────────────────────────────
-            Column(
-                modifier = Modifier.fillMaxWidth().weight(1f),
-                verticalArrangement = Arrangement.spacedBy(rs.itemSpacing(base = 3.dp))
-            ) {
-                val chunked = cores.chunked(2)
-                chunked.forEachIndexed { rowIdx, rowCores ->
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        rowCores.forEachIndexed { colIdx, v ->
-                            val coreIdx = rowIdx * 2 + colIdx
-                            Box(modifier = Modifier.weight(1f).height(barH)) {
-                                CoreBarChart(
-                                    value     = v,
-                                    coreIndex = coreIdx,
-                                    modifier  = Modifier.fillMaxSize()
-                                )
+            if (useGridMode) {
+                // ── 超过 14 核：多列网格，每行 2 列，≥6 核撑满整个区域 ──────────
+                val rowCount = (cores.size + 1) / 2
+                // 总间距 = (行数 - 1) * gapDp
+                val totalGap = gapDp * (rowCount - 1).coerceAtLeast(0)
+                val barH: Dp = ((availableHeight - totalGap) / rowCount.coerceAtLeast(1))
+                    .coerceAtLeast(6.dp)
+
+                Column(
+                    modifier = Modifier.fillMaxWidth().fillMaxHeight(),
+                    verticalArrangement = Arrangement.spacedBy(gapDp)
+                ) {
+                    val chunked = cores.chunked(2)
+                    chunked.forEachIndexed { rowIdx, rowCores ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            rowCores.forEachIndexed { colIdx, v ->
+                                val coreIdx = rowIdx * 2 + colIdx
+                                Box(modifier = Modifier.weight(1f).height(barH)) {
+                                    CoreBarChart(
+                                        value     = v,
+                                        coreIndex = coreIdx,
+                                        modifier  = Modifier.fillMaxSize()
+                                    )
+                                }
                             }
+                            if (rowCores.size == 1) Spacer(modifier = Modifier.weight(1f))
                         }
-                        if (rowCores.size == 1) Spacer(modifier = Modifier.weight(1f))
                     }
                 }
-            }
-        } else {
-            // ── ≤ 14 核：只保留进度条，铺满宽度 ─────────────────────────────
-            Column(
-                modifier = Modifier.fillMaxWidth().weight(1f),
-                verticalArrangement = Arrangement.spacedBy(rs.itemSpacing(base = 3.dp))
-            ) {
-                cores.forEachIndexed { i, v ->
-                    Box(modifier = Modifier.fillMaxWidth().height(barH)) {
-                        CoreBarChart(
-                            value     = v,
-                            coreIndex = i,
-                            modifier  = Modifier.fillMaxSize()
-                        )
+            } else {
+                // ── ≤ 14 核：
+                //   < 6 条 → 每条高度 = 可用高度一半 / 核心数，整体从上到下排列，至少占一半高度
+                //   ≥ 6 条 → 每条高度 = 可用高度 / 核心数，撑满整个区域
+                val totalGap = gapDp * (cores.size - 1).coerceAtLeast(0)
+                val barH: Dp = if (cores.size < 6) {
+                    // 整体高度 = 可用高度的一半，单条 = 整体 / 核心数
+                    val halfHeight = availableHeight / 2f
+                    ((halfHeight - totalGap) / cores.size.coerceAtLeast(1))
+                        .coerceAtLeast(8.dp)
+                } else {
+                    // 撑满：单条 = (可用高度 - 总间距) / 核心数
+                    ((availableHeight - totalGap) / cores.size.coerceAtLeast(1))
+                        .coerceAtLeast(6.dp)
+                }
+
+                Column(
+                    modifier = Modifier.fillMaxWidth().fillMaxHeight(),
+                    verticalArrangement = Arrangement.spacedBy(gapDp)
+                ) {
+                    cores.forEachIndexed { i, v ->
+                        Box(modifier = Modifier.fillMaxWidth().height(barH)) {
+                            CoreBarChart(
+                                value     = v,
+                                coreIndex = i,
+                                modifier  = Modifier.fillMaxSize()
+                            )
+                        }
                     }
                 }
             }
@@ -1203,3 +1336,104 @@ private fun formatSpeedUnit(kbps: Double): String =
 
 private fun formatMb(mb: Long): String =
     if (mb >= 1024) String.format("%.1fG", mb / 1024.0) else "${mb}M"
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CAM 功能入口卡片（玻璃卡片风格，位于 ConnectPage 底部）
+// ═══════════════════════════════════════════════════════════════════════════
+
+@Composable
+private fun CamEntryCard(onNavigate: (Page) -> Unit) {
+    val rs = rememberResponsiveSize()
+    val shape = RoundedCornerShape(20.dp)
+    val accentColor = Color(0xFF00E5FF) // Cyan 强调色
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(Brush.linearGradient(colors = listOf(BgCardAlt, BgCard)))
+            .border(
+                1.dp,
+                Brush.verticalGradient(
+                    colors = listOf(accentColor.copy(alpha = 0.3f), accentColor.copy(alpha = 0.08f))
+                ),
+                shape
+            )
+            .padding(rs.cardPadding()),
+        verticalArrangement = Arrangement.spacedBy(rs.itemSpacing(base = 10.dp))
+    ) {
+        // 标题行
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            CardLabel(label = "CAMERA", color = accentColor)
+            Text(
+                text = "RTMP 推流 & 播放",
+                color = TextMuted,
+                fontSize = rs.smallFontSize(),
+                fontFamily = FontFamily.Monospace
+            )
+        }
+
+        // 按钮行
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(rs.itemSpacing())
+        ) {
+            CamEntryButton(
+                icon     = Icons.Default.Videocam,
+                label    = "推流",
+                color    = accentColor,
+                modifier = Modifier.weight(1f),
+                onClick  = { onNavigate(Page.CAM_CAMERA) }
+            )
+            CamEntryButton(
+                icon     = Icons.Default.PlayCircleOutline,
+                label    = "播放",
+                color    = Color(0xFFFF9C3E), // 橙色
+                modifier = Modifier.weight(1f),
+                onClick  = { onNavigate(Page.CAM_PLAYER) }
+            )
+            CamEntryButton(
+                icon     = Icons.Default.Settings,
+                label    = "设置",
+                color    = MemPurple,
+                modifier = Modifier.weight(1f),
+                onClick  = { onNavigate(Page.CAM_SETTINGS) }
+            )
+        }
+    }
+}
+
+@Composable
+private fun CamEntryButton(
+    icon: ImageVector,
+    label: String,
+    color: Color,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    val rs = rememberResponsiveSize()
+    Button(
+        onClick = onClick,
+        modifier = modifier.height(rs.buttonHeight()),
+        shape = RoundedCornerShape(12.dp),
+        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = color.copy(alpha = 0.12f),
+            contentColor   = color,
+        ),
+        border = BorderStroke(1.dp, color.copy(alpha = 0.4f))
+    ) {
+        Icon(icon, null, modifier = Modifier.size(rs.iconSize(base = 16.dp)))
+        Spacer(Modifier.width(4.dp))
+        Text(
+            text = label,
+            fontFamily = FontFamily.Monospace,
+            fontSize = rs.smallFontSize(),
+            fontWeight = FontWeight.SemiBold
+        )
+    }
+}
